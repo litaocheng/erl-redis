@@ -16,7 +16,7 @@ compile:
 
 test_compile: 
 	(mkdir -p ./ebin)
-	#(cd src;$(MAKE) TEST=true NOLOG=true)
+	@#(cd src;$(MAKE) TEST=true NOLOG=true)
 	(cd src;$(MAKE) TEST=true)
 
 test: unit_test comm_test
