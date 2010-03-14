@@ -30,7 +30,7 @@ start() ->
 %% @doc the application start callback
 -spec start(Type :: any(), Args :: any()) -> any().
 start(_Type, _Args) ->
-    ?INFO2("start the supervisor sup", []),
+    %?INFO2("start the supervisor sup", []),
     supervisor:start_link({local, ?MAIN_SUP}, ?MODULE, []).
 
 %% @doc the application  stop callback
