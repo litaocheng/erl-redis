@@ -4,6 +4,7 @@
      {modules, [@MODULES@]},
      {registered, []},
      {applications, [kernel, stdlib]},
+     {mod, {redis_app, []}},
      {env, []}
     ]
 }.

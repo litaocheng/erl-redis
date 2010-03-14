@@ -1,6 +1,6 @@
 %%%----------------------------------------------------------------------
 %%%
-%%% @copyright litaocheng@gmail
+%%% @copyright erl-redis 2010
 %%%
 %%% @author litaocheng@gmail.com
 %%% @doc redis client header file
@@ -13,6 +13,8 @@
 -include_lib("eunit/include/eunit.hrl").
 -endif.
 
+-include("redis_log.hrl").
+
 %% syntax similar with '?:' in c
 -ifndef(IF).
 -define(IF(C, T, F), (case (C) of true -> (T); false -> (F) end)).
@@ -24,5 +26,7 @@
 
 -define(N2S(N), integer_to_list(N)).
 -define(S2N(S), list_to_integer(S)).
+
+
 
 -endif. % REDIS_HRL

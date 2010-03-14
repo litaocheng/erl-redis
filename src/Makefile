@@ -12,11 +12,11 @@ INCLUDE_DIRS := ../include ./
 INCLUDE_FILES := $(wildcard ../include/*.hrl) $(wildcard ./*.hrl) 
 
 EBIN_DIRS := $(wildcard ../libs/*/ebin)
-ERLC_FLAGS := -W $(addprefix -I , $(INCLUDE_DIRS)) $(EBIN_DIRS:%=-pa %)
+ERLC_FLAGS := -W $(addprefix -I , $(INCLUDE_DIRS)) $(EBIN_DIRS:%=-pa %) 
+
 
 ifdef TEST
-  ERLC_FLAGS += -DTEST
-  ERLC_FLAGS += +debug_info #+bin_opt_info
+  ERLC_FLAGS += -DTEST +debug_info
 endif
 
 ifdef NOLOG
@@ -25,6 +25,16 @@ endif
 
 ifdef HIPE
   ERLC_FLAGS += +native +"{hipe, [o3]}"
+endif
+
+# in deploy environment, the ctl file set the log dir to /var/log/$APP_NAME
+# set the etc dir to /etc/$APP_NAME
+ifdef DEPLOY
+  LOGDIR =/var/log/$(APP_NAME)
+  CONFDIR =/etc/$(APP_NAME)
+else
+  LOGDIR =./log
+  CONFDIR =./etc
 endif
 
 BASE_DIR := ..
@@ -42,13 +52,17 @@ ERL_OBJECTS_LOCAL := $(ERL_SOURCES:%.erl=./%.$(EMULATOR))
 APP_TPL_FILES = $(wildcard *.app.src)
 APP_FILES = $(APP_TPL_FILES:%.src=%)
 
-ALL_FILES = $(ERL_OBJECTS) $(addprefix $(EBIN_DIR)/, $(APP_FILES)) 
+ALL_FILES = $(ERL_OBJECTS) $(addprefix $(EBIN_DIR)/, $(APP_FILES))
 
 $(EBIN_DIR)/%.app: %.app.src
 	@echo "creating .app file... "
-	@sed -e 's:@APP_VSN@:$(APP_VSN):g' \
-		-e 's:@APP_NAME@:$(APP_NAME):g' \
+	@sed -e 's:@APP_NAME@:$(APP_NAME):g' \
+		-e 's:@APP_VSN@:$(APP_VSN):g' \
 		-e 's:@MODULES@:$(ERL_MODULES_IN_APP):g' -e "s:\`:\':g" -e 's/,]/]/g' $< > $@
+
+$(BASE_DIR)/%ctl: %ctl.tpl
+	@sed -e 's:@LOGDIR@:$(LOGDIR):g' -e 's:@CONFDIR@:$(CONFDIR):g'  $< > $@
+	(chmod 775 $@)
 
 $(EBIN_DIR)/%.$(EMULATOR): %.erl $(INCLUDE_FILES)
 	$(ERLC) $(ERLC_FLAGS) -o $(EBIN_DIR) $<
@@ -59,4 +73,4 @@ edoc:
 	$(ERL) -noshell -eval "edoc:application($(APP_NAME), \".\", [${DOC_OPTS}]),init:stop()"
 
 clean:
-	(rm -rf ./*.beam; rm -f *.app;)
+	(rm -rf ./*.beam; rm -rf $(EBIN_DIR)/*.beam; rm -f *.app; rm -f *ctl)

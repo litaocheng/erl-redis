@@ -1,0 +1,7 @@
+** this is the overview.doc file for the application 'erl-redis' **
+
+@author litaocheng <litaocheng@gmail.com>
+@copyright 2010
+@version @VERSION@
+@title Welcome to the `erl-redis' application!
+@doc `erl-redis' is an erlang client for redis.
