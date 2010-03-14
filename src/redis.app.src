@@ -1,0 +1,9 @@
+{application, @APP_NAME@,
+    [{description, "the redis erlang client"},
+     {vsn, "@APP_VSN@"},
+     {modules, [@MODULES@]},
+     {registered, []},
+     {applications, [kernel, stdlib]},
+     {env, []}
+    ]
+}.
