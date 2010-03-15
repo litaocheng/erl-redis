@@ -213,8 +213,9 @@ call(Cmd) ->
 
 %% do the call with key
 call_key(Type, Key) ->
-    {ok, Conn} = redis_servers:get_conn(Key),
-    redis_client:send(Conn, single_line(Type, Key)).
+    {ok, Client} = redis_servers:get_client(Key),
+    ?DEBUG2("send cmd [~p, ~p]  by client:~p", [Type, Key, Client]),
+    redis_client:send(Client, single_line(Type, Key)).
 
 %% convert status code to return
 status_return(<<"OK">>) -> ok;
@@ -255,6 +256,5 @@ single_line_test_() ->
 
         ?_assert(true)
     ].
-
 
 -endif.
