@@ -21,6 +21,18 @@
 i() ->
     ok.
 
+%% @doc set single redis server
+-spec set_server(Host :: inet_host(), Port :: inet_port()) ->
+    'ok' | {'error', any()}.
+set_server(Host, Port) ->
+    redis_client:set_server(single, {Host, Port}).
+
+%% @doc set the distributed servers info 
+-spec set_dist(Dist :: dist_info()) ->
+    'ok' | {'error', any()}.
+set_dist(Dist) ->
+    redis_client:set_server(dist, Dist).
+
 %%
 %% commands operating on all the kind of values
 %%
@@ -28,6 +40,7 @@ i() ->
     boolean().
 exists(Key) ->
     call(single_line(<<"EXIST">>, Key)).
+    %call_key(<<"EXIST">>, Key).
 
 -spec delete(Key :: key()) -> 
     'ok' | 'fail'.
@@ -179,9 +192,13 @@ decr(Key, N) ->
 %%------------------------------------------------------------------------------
 
 %% do the call
-call(_Cmd) ->
-    ok.
-    %redis_client:send(Cmd).
+call(Cmd) ->
+    redis_client:send(ok, Cmd).
+
+%% do the call with key
+call_key(Type, Key) ->
+    {ok, Conn} = redis_servers:get_conn(Key),
+    redis_client:send(Conn, single_line(Type, Key)).
 
 %% convert status code to return
 status_return(<<"OK">>) -> ok;

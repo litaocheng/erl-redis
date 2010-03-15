@@ -37,6 +37,10 @@
 -define(CRLF, "\r\n").
 -define(CRLF_BIN, <<"\r\n">>).
 
+%% the redis supervisor name
+-define(REDIS_SUP, redis_sup).
+-define(CONN_SUP, redis_conn_sup).
+
 
 -type key() :: binary() | [byte()].
 -type index() :: non_neg_integer().
@@ -47,5 +51,10 @@
 -type error_reply() :: any().
 %-type nil() :: 'nil'.
 -type return() :: 'ok' | 'fail'.
+
+-type inet_host() :: atom() | string() | binary().
+-type inet_port() :: 0..65535.
+
+-type dist_info() :: any().
 
 -endif. % REDIS_HRL

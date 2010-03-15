@@ -3,18 +3,17 @@
 %%% @copyright erl-redis 2010
 %%%
 %%% @author litaocheng <litaocheng@gmail.com>
-%%% @doc 
+%%% @doc the redis servers manager
 %%% @end
 %%%
 %%%----------------------------------------------------------------------
--module(redis_client).
+-module(redis_servers).
 -author('litaocheng@gmail.com').
 -vsn('0.1').
 -behaviour(gen_server).
 -include("redis.hrl").
 
 -export([start/0, start_link/0]).
--export([send/2]).
 
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
                             terminate/2, code_change/3]).
@@ -35,10 +34,6 @@ start() ->
 start_link() ->
     ?DEBUG2("start_link ~p ~n", [?SERVER]),
     gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
-
-%% @doc send the command
-send(Conn, Bin) ->
-    gen_server:call(Conn, {send, Bin}).
 
 %%
 %% gen_server callbacks
