@@ -83,7 +83,8 @@ type(Key) ->
 -spec keys(Pattern :: pattern()) -> 
     [key()].
 keys(Pattern) ->
-    call(single_line(<<"KEYS">>, Pattern)).
+    Bin = call(single_line(<<"KEYS">>, Pattern)),
+    redis_proto:tokens(Bin, ?SEP_BIN).
 
 -spec random_key() -> 
     key() | nil().

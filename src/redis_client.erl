@@ -12,7 +12,6 @@
 -vsn('0.1').
 -behaviour(gen_server).
 -include("redis.hrl").
-
 -export([start/0, start_link/2]).
 -export([get_sock/1, send/2]).
 
@@ -52,12 +51,11 @@ get_sock(Client) ->
 
 %% @doc send the data
 send({Client, Sock} = Conn, Data) when is_port(Sock) ->
-    %gen_server:call(Conn, {send, Bin}).
     case gen_tcp:send(Sock, Data) of
         ok -> % receive response
             case gen_tcp:recv(Sock, 0, ?RECV_TIMEOUT) of
                 {ok, Packet} ->
-                    redis_protocol:parse_response(Conn);
+                    redis_protocol:parse_response(Packet, Conn);
                 {error, Reason} ->
                     ?ERROR2("recv message from ~p error:~p", [get_server(Client), Reason]),
                     {error, Reason}
