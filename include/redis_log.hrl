@@ -45,26 +45,24 @@
         -define(ML_DATA(D), [?MODULE, ?LINE]++(D)).
 
         -define(DEBUG(F), 
-            error_logger:info_msg(?ML_FMT("[D]"++F), ?ML_DATA([])).
-        -define(DEBUG2(F, D), ok).
-
-        %-define(DEBUG2(F, D),
-        %    error_logger:info_msg(?ML_FMT("[D]"++F), ?ML_DATA(D)).
+            error_logger:info_msg(?ML_FMT("[D]"++F), ?ML_DATA([]))).
+        -define(DEBUG2(F, D), 
+            error_logger:info_msg(?ML_FMT("[D]"++F), ?ML_DATA(D))).
 
         -define(INFO(F), 
-            error_logger:info_msg(?ML_FMT("[I]"++F), ?ML_DATA([])).
+            error_logger:info_msg(?ML_FMT("[I]"++F), ?ML_DATA([]))).
         -define(INFO2(F, D),
-            error_logger:info_msg(?ML_FMT("[I]"++F), ?ML_DATA(D)).
+            error_logger:info_msg(?ML_FMT("[I]"++F), ?ML_DATA(D))).
 
         -define(WARN(F),
-            error_logger:warning_msg(?ML_FMT("[*W*]"++F), ?ML_DATA([])).
+            error_logger:warning_msg(?ML_FMT("[*W*]"++F), ?ML_DATA([]))).
         -define(WARN2(F, D), 
-            error_logger:warning_msg(?ML_FMT("[*W*]"++F), ?ML_DATA(D)).
+            error_logger:warning_msg(?ML_FMT("[*W*]"++F), ?ML_DATA(D))).
 
         -define(ERROR(F),
-            error_logger:error_msg(?ML_FMT("[**E**]"++F), ?ML_DATA([])).
+            error_logger:error_msg(?ML_FMT("[**E**]"++F), ?ML_DATA([]))).
         -define(ERROR2(F, D),
-            error_logger:error_msg(?ML_FMT("[**E**]"++F), ?ML_DATA(D)).
+            error_logger:error_msg(?ML_FMT("[**E**]"++F), ?ML_DATA(D))).
 
     -endif. %EUNIT
 

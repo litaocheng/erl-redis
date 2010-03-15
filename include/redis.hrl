@@ -40,11 +40,13 @@
 %% the redis supervisor name
 -define(REDIS_SUP, redis_sup).
 -define(CONN_SUP, redis_conn_sup).
+-define(CONN_TIMEOUT, 500).
 
-
+%% type defines
 -type key() :: binary() | [byte()].
 -type index() :: non_neg_integer().
 -type pattern() :: [byte()].
+-type passwd() :: [byte()] | binary().
 -type second() :: non_neg_integer().
 -type value_type() :: 'none' | 'string' | 'list' | 'set'.
 -type status_code() :: atom().
@@ -55,6 +57,10 @@
 -type inet_host() :: atom() | string() | binary().
 -type inet_port() :: 0..65535.
 
+-type single_server() :: {inet_host(), inet_port()}.
 -type dist_info() :: any().
+-type server_type() :: 'undefined' | 'single' | 'dist'.
+-type server_info() ::  single_server() | dist_info().
+-type connection() :: pid().
 
 -endif. % REDIS_HRL

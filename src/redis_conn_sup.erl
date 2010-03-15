@@ -15,6 +15,7 @@
 -behaviour(supervisor).
 
 -export([start_link/0]).
+-export([connect/2, connect/3]).
 -export([init/1]).
 
 
@@ -25,6 +26,17 @@ start_link() ->
     ?INFO2("start the supervisor", []),
     supervisor:start_link({local, ?CONN_SUP}, ?MODULE, []).
 
+%% @doc start an new redis_client process connect the specify redis server
+-spec connect(Host :: inet_host(), Port :: inet_port()) ->
+    {'ok', pid()} | 'ignore' | {'error', any()}.
+connect(Host, Port) ->
+    connect(Host, Port, ?CONN_TIMEOUT).
+
+%% @doc start an new redis_client process connect the specify redis server
+-spec connect(Host :: inet_host(), Port :: inet_port(), Timeout :: timeout()) ->
+    {'ok', pid()} | 'ignore' | {'error', any()}.
+connect(Host, Port, Timeout) ->
+    supervisor:start_child(?CONN_SUP, [{Host, Port}, Timeout]).
 
 %% @doc the connection supervisor callback
 init([]) -> 

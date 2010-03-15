@@ -33,14 +33,30 @@ set_server(Host, Port) ->
 set_dist(Dist) ->
     redis_client:set_server(dist, Dist).
 
+%% @doc set the max connections for per server
+max_conn_per_server(_N) ->
+    false.
+
+%%
+%% Connection handling
+%%
+-spec auth(Passwd :: passwd()) ->
+    'ok'.
+auth(Passwd) ->
+    redis_servers:set_passwd(Passwd).
+
+-spec auth(Server :: single_server(), Passwd :: passwd()) ->
+    'ok'.
+auth(Server, Passwd) ->
+    redis_servers:set_passwd(Server, Passwd).
+
 %%
 %% commands operating on all the kind of values
 %%
 -spec exists(Key :: key()) -> 
     boolean().
 exists(Key) ->
-    call(single_line(<<"EXIST">>, Key)).
-    %call_key(<<"EXIST">>, Key).
+    call_key(<<"EXIST">>, Key).
 
 -spec delete(Key :: key()) -> 
     'ok' | 'fail'.
