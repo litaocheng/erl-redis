@@ -36,13 +36,13 @@
 %% @doc start the redis_sysdata server
 -spec start() -> {'ok', any()} | 'ignore' | {'error', any()}.
 start() ->
-    ?DEBUG2("start ~p ~n", [?SERVER]),
+    ?DEBUG2("start ~p", [?SERVER]),
     gen_server:start({local, ?SERVER}, ?MODULE, [], []).
 
 %% @doc start_link the redis_sysdata server
 -spec start_link() -> {'ok', any()} | 'ignore' | {'error', any()}.
 start_link() ->
-    ?DEBUG2("start_link ~p ~n", [?SERVER]),
+    ?DEBUG2("start_link ~p", [?SERVER]),
     gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
 
 %% @doc set the auth passwd to all the servers
@@ -64,7 +64,8 @@ passwd(Server) ->
 -spec set_server(Type :: server_type(), Server :: server_info()) ->
     'ok' | {'error', 'already_set'}.
 set_server(Type, Server) ->
-    gen_server:call(?SERVER, {set_srver, Type, Server}).
+    ?DEBUG2("set server ~p ~p", [Type, Server]),
+    gen_server:call(?SERVER, {set_server, Type, Server}).
 
 %% @doc get the specify server
 -spec get_client(Key :: key()) ->
@@ -76,6 +77,7 @@ get_client(Key) ->
 %% gen_server callbacks
 %%
 init(_Args) ->
+    ?DEBUG2("init the redis_servers", []),
     {ok, #state{}}.
 
 handle_call({set_passwd_all, Passwd}, _From, State) ->
@@ -196,10 +198,10 @@ find_conn(Server, Conns) ->
 %% thus, we will not block the redis_servers process. when the redis_client
 %% process created by redis_conn_sup connect the redis server ok, 
 %%% it will notify the redis_servers to update the conns info
-start_client(From, Server) ->
+start_client(From, Server = {Host, Port}) ->
     spawn(
         fun() ->
-            {ok, Client} = redis_conn_sup:connect(Server),
+            {ok, Client} = redis_conn_sup:connect(Host, Port),
             {ok, Sock} = redis_client:get_sock(Client),
             ?DEBUG2("connect the server:~p ok, now reply the caller", [Server]),
             gen_server:reply(From, {ok, {Client, Sock}})

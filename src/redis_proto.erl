@@ -59,27 +59,29 @@ tokens2(<<>>, _Sep, Toks, Bin) ->
     lists:reverse([Bin | Toks]).
 
 %% parse status reply
-parse_status_reply(<<"OK">>, _Conn) ->
+parse_status_reply(<<"OK\r\n">>, _Conn) ->
     ok;
-parse_status_reply(<<"QUEUED">>, _Conn) ->
+parse_status_reply(<<"QUEUED\r\n">>, _Conn) ->
     queued;
-parse_status_reply(<<"PONG">>, _Conn) ->
+parse_status_reply(<<"PONG\r\n">>, _Conn) ->
     pong.
 
 %% parse error reply
-parse_error_reply(Msg, _Conn) when is_binary(Msg) ->
+parse_error_reply(Bin, _Conn) when is_binary(Bin) ->
+    L = byte_size(Bin) - 2,
+    <<Msg:L/binary, "\r\n">> = Bin,
     {error, Msg}.
 
 %% parse integer repley
-parse_intger_reply(<<"0">>, _Conn) ->
+parse_intger_reply(<<"0\r\n">>, _Conn) ->
     0;
-parse_intger_reply(<<"1">>, _Conn) ->
+parse_intger_reply(<<"1\r\n">>, _Conn) ->
     1;
 parse_intger_reply(Bin, _Conn) ->
     b2n(Bin).
     
 %% parse bulk reply
-parse_bulk_reply(<<"-1">>, _Conn) ->
+parse_bulk_reply(<<"-1\r\n">>, _Conn) ->
     none;
 parse_bulk_reply(Bin, {_, Sock}) ->
     N = b2n(Bin),
@@ -89,7 +91,7 @@ parse_bulk_reply(Bin, {_, Sock}) ->
     Val.
      
 %% parse multi bulk reply
-parse_mbulk_reply(<<"-1">>, _Conn) ->
+parse_mbulk_reply(<<"-1\r\n">>, _Conn) ->
     none;
 parse_mbulk_reply(Bin, Conn) ->
     N = b2n(Bin),
@@ -128,17 +130,17 @@ b2n(Bin) ->
 
 b2n(<<C, Rest/binary>>, N) when C >= $0, C =< $9 ->
     b2n(Rest, N * 10 + (C - $0));
-b2n(<<>>, N) ->
+b2n(<<"\r\n">>, N) ->
     N.
 
 -ifdef(TEST).
 
 b2n_test_() ->
     [
-        ?_assertEqual(233, b2n(<<"233">>)),     
-        ?_assertEqual(0, b2n(<<"0">>)),     
-        ?_assertEqual(123, b2n(<<"123">>)),     
-        ?_assertEqual(12432, b2n(<<"12432">>))     
+        ?_assertEqual(233, b2n(<<"233\r\n">>)),     
+        ?_assertEqual(0, b2n(<<"0\r\n">>)),     
+        ?_assertEqual(123, b2n(<<"123\r\n">>)),     
+        ?_assertEqual(12432, b2n(<<"12432\r\n">>))     
     ].
 
 parse_reply(Bin) ->
@@ -146,20 +148,20 @@ parse_reply(Bin) ->
 
 parse_test_() ->
     [
-        ?_assertEqual(ok, parse_reply(<<"+OK">>)),
-        ?_assertEqual(queued, parse_reply(<<"+QUEUED">>)),
-        ?_assertEqual(pong, parse_reply(<<"+PONG">>)),
+        ?_assertEqual(ok, parse_reply(<<"+OK\r\n">>)),
+        ?_assertEqual(queued, parse_reply(<<"+QUEUED\r\n">>)),
+        ?_assertEqual(pong, parse_reply(<<"+PONG\r\n">>)),
 
-        ?_assertEqual({error, <<"FORMAT">>}, parse_reply(<<"-FORMAT">>)),
-        ?_assertEqual({error, <<"UNKNOWN">>}, parse_reply(<<"-UNKNOWN">>)),
+        ?_assertEqual({error, <<"FORMAT">>}, parse_reply(<<"-FORMAT\r\n">>)),
+        ?_assertEqual({error, <<"UNKNOWN">>}, parse_reply(<<"-UNKNOWN\r\n">>)),
 
-        ?_assertEqual(0, parse_reply(<<":0">>)),
-        ?_assertEqual(1, parse_reply(<<":1">>)),
-        ?_assertEqual(231, parse_reply(<<":231">>)),
-        ?_assertEqual(987234, parse_reply(<<":987234">>)),
+        ?_assertEqual(0, parse_reply(<<":0\r\n">>)),
+        ?_assertEqual(1, parse_reply(<<":1\r\n">>)),
+        ?_assertEqual(231, parse_reply(<<":231\r\n">>)),
+        ?_assertEqual(987234, parse_reply(<<":987234\r\n">>)),
 
-        ?_assertEqual(none, parse_reply(<<"$-1">>)),
-        ?_assertEqual(none, parse_reply(<<"*-1">>)),
+        ?_assertEqual(none, parse_reply(<<"$-1\r\n">>)),
+        ?_assertEqual(none, parse_reply(<<"*-1\r\n">>)),
 
         ?_assert(true)
     ].

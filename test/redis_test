@@ -1,0 +1,14 @@
+#!/usr/bin/env escript
+%% -*- erlang -*-
+%%! -smp enable +A 16
+-mode(compile).
+
+main(_Args) ->
+    redis_app:start(),
+    ok = redis:set_server(localhost, 6379),
+    Ret = redis:exists("key1"),
+    io:format("exists return is ~p~n", [Ret]),
+    ok.
+
+
+

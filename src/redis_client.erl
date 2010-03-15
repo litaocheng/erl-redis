@@ -51,11 +51,13 @@ get_sock(Client) ->
 
 %% @doc send the data
 send({Client, Sock} = Conn, Data) when is_port(Sock) ->
+    ?DEBUG2("send data ~p to server ~p", [Data, get_server(Client)]),
     case gen_tcp:send(Sock, Data) of
         ok -> % receive response
             case gen_tcp:recv(Sock, 0, ?RECV_TIMEOUT) of
                 {ok, Packet} ->
-                    redis_protocol:parse_response(Packet, Conn);
+                    ?DEBUG2("recv reply :~p", [Packet]),
+                    redis_proto:parse_reply(Packet, Conn);
                 {error, Reason} ->
                     ?ERROR2("recv message from ~p error:~p", [get_server(Client), Reason]),
                     {error, Reason}
@@ -113,8 +115,12 @@ code_change(_Old, State, _Extra) ->
 %% do the auth
 do_auth(Server, Sock) ->
     Passwd = redis_servers:passwd(Server),
-    ok = send(Sock, [<<"AUTH ">>, Passwd, ?CRLF]).
-
+    case Passwd of
+        "" ->
+            ok;
+        _ ->
+            ok = send(Sock, [<<"AUTH ">>, Passwd, ?CRLF])
+    end.
 
 %% notify the redis_servers the client info
 set_client(Server, Pid, Sock) ->

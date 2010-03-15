@@ -28,7 +28,7 @@ start() ->
 %% @doc the application start callback
 -spec start(Type :: any(), Args :: any()) -> any().
 start(_Type, _Args) ->
-    ?INFO2("start the supervisor sup", []),
+    ?INFO2("start the supervisor", []),
     supervisor:start_link({local, ?REDIS_SUP}, ?MODULE, []).
 
 %% @doc the application  stop callback
@@ -37,7 +37,7 @@ stop(_State) ->
 
 %% @doc the main supervisor and connection supervisor callbacks
 init([]) -> 
-    ?DEBUG2("init supervisor~n", []),
+    ?DEBUG2("init supervisor", []),
     Stragegy = {one_for_one, 10, 10},
 
     ConnSup = {?CONN_SUP, {redis_conn_sup, start_link, []},

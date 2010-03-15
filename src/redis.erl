@@ -15,7 +15,6 @@
 -export([i/0]).
 -compile([export_all]).
 
-
 %% @doc show stats info in the stdout
 -spec i() -> 'ok'.
 i() ->
@@ -25,13 +24,13 @@ i() ->
 -spec set_server(Host :: inet_host(), Port :: inet_port()) ->
     'ok' | {'error', any()}.
 set_server(Host, Port) ->
-    redis_client:set_server(single, {Host, Port}).
+    redis_servers:set_server(single, {Host, Port}).
 
 %% @doc set the distributed servers info 
 -spec set_dist(Dist :: dist_info()) ->
     'ok' | {'error', any()}.
 set_dist(Dist) ->
-    redis_client:set_server(dist, Dist).
+    redis_servers:set_server(dist, Dist).
 
 %% @doc set the max connections for per server
 max_conn_per_server(_N) ->
@@ -56,7 +55,10 @@ auth(Server, Passwd) ->
 -spec exists(Key :: key()) -> 
     boolean().
 exists(Key) ->
-    call_key(<<"EXIST">>, Key).
+    case call_key(<<"EXISTS">>, Key) of
+       1 -> true;
+       0 -> false
+    end.
 
 -spec delete(Key :: key()) -> 
     'ok' | 'fail'.
