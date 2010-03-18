@@ -59,10 +59,11 @@
 -type inet_host() :: atom() | string() | binary().
 -type inet_port() :: 0..65535.
 
--type single_server() :: {inet_host(), inet_port()}.
--type dist_info() :: any().
+-type server() :: {inet_host(), inet_port()}.
+-type single_server() :: {inet_host(), inet_port(), pos_integer()}.
+-type dist_server() :: any().
+-type server_info() ::  single_server() | dist_server().
+
 -type server_type() :: 'undefined' | 'single' | 'dist'.
--type server_info() ::  single_server() | dist_info().
--type connection() :: {pid(), port()}.
 
 -endif. % REDIS_HRL

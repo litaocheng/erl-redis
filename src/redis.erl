@@ -15,22 +15,31 @@
 -export([i/0]).
 -compile([export_all]).
 
+%% connection pool size
+-define(DEF_POOL, 2).
+
 %% @doc show stats info in the stdout
 -spec i() -> 'ok'.
 i() ->
     ok.
 
 %% @doc set single redis server
--spec set_server(Host :: inet_host(), Port :: inet_port()) ->
+-spec single_server(Host :: inet_host(), Port :: inet_port()) ->
     'ok' | {'error', any()}.
-set_server(Host, Port) ->
-    redis_servers:set_server(single, {Host, Port}).
+single_server(Host, Port) ->
+    single_server(Host, Port, ?DEF_POOL).
+
+%% @doc set single redis server, with the connection pool option
+-spec single_server(Host :: inet_host(), Port :: inet_port(), Pool :: pos_integer()) ->
+    'ok' | {'error', any()}.
+single_server(Host, Port, Pool) ->
+    redis_servers:single_server({Host, Port, Pool}).
 
 %% @doc set the distributed servers info 
--spec set_dist(Dist :: dist_info()) ->
+-spec dist_server(Dist :: dist_server()) ->
     'ok' | {'error', any()}.
-set_dist(Dist) ->
-    redis_servers:set_server(dist, Dist).
+dist_server(Dist) ->
+    redis_servers:dist_server(Dist).
 
 %% @doc set the max connections for per server
 max_conn_per_server(_N) ->

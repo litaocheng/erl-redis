@@ -17,18 +17,18 @@
 -export([tokens/2]).
 
 %% @doc parse the reply
--spec parse_reply(Bin :: binary(), Conn :: connection()) ->
+-spec parse_reply(Bin :: binary(), Sock :: port()) ->
     any().
-parse_reply(<<"+", Rest/binary>>, Conn) ->
-    parse_status_reply(Rest, Conn);
-parse_reply(<<"-", Rest/binary>>, Conn) ->
-    parse_error_reply(Rest, Conn);
-parse_reply(<<":", Rest/binary>>, Conn) ->
-    parse_intger_reply(Rest, Conn);
-parse_reply(<<"$", Rest/binary>>, Conn) ->
-    parse_bulk_reply(Rest, Conn);
-parse_reply(<<"*", Rest/binary>>, Conn) ->
-    parse_mbulk_reply(Rest, Conn).
+parse_reply(<<"+", Rest/binary>>, Sock) ->
+    parse_status_reply(Rest, Sock);
+parse_reply(<<"-", Rest/binary>>, Sock) ->
+    parse_error_reply(Rest, Sock);
+parse_reply(<<":", Rest/binary>>, Sock) ->
+    parse_intger_reply(Rest, Sock);
+parse_reply(<<"$", Rest/binary>>, Sock) ->
+    parse_bulk_reply(Rest, Sock);
+parse_reply(<<"*", Rest/binary>>, Sock) ->
+    parse_mbulk_reply(Rest, Sock).
 
 %% @doc return a list of tokens in string, separated by the characters
 %%  in Separatorlist
@@ -59,29 +59,29 @@ tokens2(<<>>, _Sep, Toks, Bin) ->
     lists:reverse([Bin | Toks]).
 
 %% parse status reply
-parse_status_reply(<<"OK\r\n">>, _Conn) ->
+parse_status_reply(<<"OK\r\n">>, _Sock) ->
     ok;
-parse_status_reply(<<"QUEUED\r\n">>, _Conn) ->
+parse_status_reply(<<"QUEUED\r\n">>, _Sock) ->
     queued;
-parse_status_reply(<<"PONG\r\n">>, _Conn) ->
+parse_status_reply(<<"PONG\r\n">>, _Sock) ->
     pong.
 
 %% parse error reply
-parse_error_reply(Bin, _Conn) when is_binary(Bin) ->
+parse_error_reply(Bin, _Sock) when is_binary(Bin) ->
     L = byte_size(Bin) - 2,
     <<Msg:L/binary, "\r\n">> = Bin,
     {error, Msg}.
 
 %% parse integer repley
-parse_intger_reply(<<"0\r\n">>, _Conn) ->
+parse_intger_reply(<<"0\r\n">>, _Sock) ->
     0;
-parse_intger_reply(<<"1\r\n">>, _Conn) ->
+parse_intger_reply(<<"1\r\n">>, _Sock) ->
     1;
-parse_intger_reply(Bin, _Conn) ->
+parse_intger_reply(Bin, _Sock) ->
     b2n(Bin).
     
 %% parse bulk reply
-parse_bulk_reply(<<"-1\r\n">>, _Conn) ->
+parse_bulk_reply(<<"-1\r\n">>, _Sock) ->
     none;
 parse_bulk_reply(Bin, {_, Sock}) ->
     N = b2n(Bin),
@@ -91,18 +91,18 @@ parse_bulk_reply(Bin, {_, Sock}) ->
     Val.
      
 %% parse multi bulk reply
-parse_mbulk_reply(<<"-1\r\n">>, _Conn) ->
+parse_mbulk_reply(<<"-1\r\n">>, _Sock) ->
     none;
-parse_mbulk_reply(Bin, Conn) ->
+parse_mbulk_reply(Bin, Sock) ->
     N = b2n(Bin),
-    parse_mbulk_reply1(N, Conn, []).
+    parse_mbulk_reply1(N, Sock, []).
 
-parse_mbulk_reply1(0, _Conn, Acc) ->
+parse_mbulk_reply1(0, _Sock, Acc) ->
     Acc;
-parse_mbulk_reply1(N, {_, Sock} = Conn, Acc) ->
+parse_mbulk_reply1(N, Sock, Acc) ->
     <<$$, Bin>> = recv_line(Sock),
-    Bulk = parse_bulk_reply(Bin, Conn),
-    parse_mbulk_reply1(N - 1, Conn, [Bulk | Acc]).
+    Bulk = parse_bulk_reply(Bin, Sock),
+    parse_mbulk_reply1(N - 1, Sock, [Bulk | Acc]).
     
 %% recv n bytes
 recv_n(Sock, Len) ->
@@ -111,7 +111,7 @@ recv_n(Sock, Len) ->
             Bin;
         {error, Reason} ->
             ?ERROR2("recv n bytes error:~p", [Reason]),
-            throw({error, Reason})
+            throw({tcp_error, Reason})
     end.
 
 %% recv line bytes
@@ -121,7 +121,7 @@ recv_line(Sock) ->
             Bin;
         {error, Reason} ->
             ?ERROR2("recv line error:~p", [Reason]),
-            throw({error, Reason})
+            throw({tcp_error, Reason})
     end.
 
 %% binary to integer

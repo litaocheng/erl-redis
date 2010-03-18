@@ -5,7 +5,8 @@
 
 main(_Args) ->
     redis_app:start(),
-    ok = redis:set_server(localhost, 6379),
+    ok = redis:single_server(localhost, 6379, 2),
+    io:format("call exists api", []),
     Ret = redis:exists("key1"),
     io:format("exists return is ~p~n", [Ret]),
     ok.

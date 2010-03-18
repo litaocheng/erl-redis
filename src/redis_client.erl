@@ -12,7 +12,7 @@
 -vsn('0.1').
 -behaviour(gen_server).
 -include("redis.hrl").
--export([start/0, start_link/2]).
+-export([start_link/3]).
 -export([get_sock/1, send/2]).
 
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -20,6 +20,7 @@
 
 -record(state, {
         server,             % the host and port
+        index,              % the index in connection pool
         sock = null,        % the socket
         db = 0,             % the default db index
         dummy
@@ -29,20 +30,13 @@
             {packet, line}, {nodelay, true},
             {send_timeout, 5000}, {send_timeout_close, true}]).
 
--define(SERVER, ?MODULE).
-
-%% @doc start the redis_sysdata server
--spec start() -> {'ok', any()} | 'ignore' | {'error', any()}.
-start() ->
-    ?DEBUG2("start ~p ~n", [?SERVER]),
-    gen_server:start({local, ?SERVER}, ?MODULE, [], []).
 
 %% @doc start_link the redis_client server
--spec start_link(Server :: single_server(), Timeout :: timeout()) -> 
+-spec start_link(Server :: single_server(), Index :: pos_integer(), Timeout :: timeout()) -> 
     {'ok', any()} | 'ignore' | {'error', any()}.
-start_link(Server, Timeout) ->
-    ?DEBUG2("start_link ~p ~n", [?SERVER]),
-    gen_server:start_link({local, ?SERVER}, ?MODULE, {Server, Timeout}, []).
+start_link(Server, Index, Timeout) ->
+    ?DEBUG2("start_link redis_client ~p (~p)", [Server, Index]),
+    gen_server:start_link(?MODULE, {Server, Index, Timeout}, []).
 
 %% @doc return the socket
 -spec get_sock(Client :: pid()) -> {'ok', port()}.
@@ -50,40 +44,35 @@ get_sock(Client) ->
     {ok, gen_server:call(Client, get_sock)}.
 
 %% @doc send the data
-send({Client, Sock} = Conn, Data) when is_port(Sock) ->
+send(Client, Data) ->
     ?DEBUG2("send data ~p to server ~p", [Data, get_server(Client)]),
-    case gen_tcp:send(Sock, Data) of
-        ok -> % receive response
-            case gen_tcp:recv(Sock, 0, ?RECV_TIMEOUT) of
-                {ok, Packet} ->
-                    ?DEBUG2("recv reply :~p", [Packet]),
-                    redis_proto:parse_reply(Packet, Conn);
-                {error, Reason} ->
-                    ?ERROR2("recv message from ~p error:~p", [get_server(Client), Reason]),
-                    {error, Reason}
-            end;
-        {error, Reason} ->
-            ?ERROR2("send message to ~p error:~p", [get_server(Client), Reason]),
-            {error, Reason}
-    end.
+    gen_server:call(Client, {command, Data}).
 
 %%
 %% gen_server callbacks
 %%
-init({Server = {Host, Port}, Timeout}) ->
+init({Server = {Host, Port}, Index, Timeout}) ->
+    ?DEBUG2("init the redis client ~p:~p (~p)", [Host, Port, Index]),
     case gen_tcp:connect(Host, Port, ?TCP_OPTS, Timeout) of
         {ok, Sock} ->
             % do the auth
             ok = do_auth(Server, Sock),
             % notify the client info to the redis_servers
-            ok = set_client(Server, self(), Sock),
+            ok = set_client(Server, Index, self()),
 
-            {ok, #state{server = Server, sock = Sock}};
+            {ok, #state{server = Server, index = Index, sock = Sock}};
         {error, Reason} ->
             ?ERROR2("connect ~p:~p error", [Host, Port]),
             {stop, Reason}
     end.
 
+handle_call({command, Data}, _From, State) ->
+    case do_send_recv(Data, State) of
+        {tcp_error, Reason} ->
+            {stop, Reason, {tcp_error, Reason}, State};
+        Reply ->
+            {reply, Reply, State}
+    end;
 handle_call(get_server, _From, State = #state{server = Server}) ->
     {reply, Server, State};
 handle_call(get_sock, _From, State = #state{sock = Sock}) ->
@@ -112,6 +101,23 @@ code_change(_Old, State, _Extra) ->
 %%
 %%-----------------------------------------------------------------------------
 
+%% do sync send and recv 
+do_send_recv(Data, #state{sock = Sock, server = Server}) ->
+    case gen_tcp:send(Sock, Data) of
+        ok -> % receive response
+            case gen_tcp:recv(Sock, 0, ?RECV_TIMEOUT) of
+                {ok, Packet} ->
+                    ?DEBUG2("recv reply :~p", [Packet]),
+                    redis_proto:parse_reply(Packet, Sock);
+                {error, Reason} ->
+                    ?ERROR2("recv message from ~p error:~p", [Server, Reason]),
+                    {tcp_error, Reason}
+            end;
+        {error, Reason} ->
+            ?ERROR2("send message to ~p error:~p", [Server, Reason]),
+            {tcp_error, Reason}
+    end.
+
 %% do the auth
 do_auth(Server, Sock) ->
     Passwd = redis_servers:passwd(Server),
@@ -123,8 +129,8 @@ do_auth(Server, Sock) ->
     end.
 
 %% notify the redis_servers the client info
-set_client(Server, Pid, Sock) ->
-    gen_server:cast(?REDIS_SERVERS, {set_client, Server, Pid, Sock}).
+set_client(Server, Index, Pid) ->
+    gen_server:cast(?REDIS_SERVERS, {set_client, Server, Index, Pid}).
 
 %% get the server info
 get_server(Client) ->
