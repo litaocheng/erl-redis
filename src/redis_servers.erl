@@ -139,7 +139,7 @@ do_set_all_passwd(Passwd,
     {ok, State#state{auth = [{{Host, Port}, Passwd}]}};
 do_set_all_passwd(Passwd,
         State = #state{type = dist, server = DServer}) ->
-    Servers = redis_dist:server_list(DServer),
+    Servers = redis_dist:to_list(DServer),
     {ok, State#state{auth = [{{Host, Port}, Passwd} || {Host, Port, _} <- Servers]}}.
 
 %% set the passwd

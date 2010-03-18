@@ -55,19 +55,25 @@ init({Server = {Host, Port}, Index, Timeout}) ->
     ?DEBUG2("init the redis client ~p:~p (~p)", [Host, Port, Index]),
     case gen_tcp:connect(Host, Port, ?TCP_OPTS, Timeout) of
         {ok, Sock} ->
-            % do the auth
-            ok = do_auth(Server, Sock),
-            % notify the client info to the redis_servers
-            ok = set_client(Server, Index, self()),
+            case do_auth(Sock, Server) of
+                ok ->
+                    % notify the client info to the redis_servers
+                    ok = set_client(Server, Index, self()),
 
-            {ok, #state{server = Server, index = Index, sock = Sock}};
+                    {ok, #state{server = Server, index = Index, sock = Sock}};
+                {tcp_error, Reason} ->
+                    {stop, Reason};
+                _ ->
+                    ?ERROR2("auth failed", []),
+                    {stop, auth_failed}
+            end;
         {error, Reason} ->
             ?ERROR2("connect ~p:~p error", [Host, Port]),
             {stop, Reason}
     end.
 
-handle_call({command, Data}, _From, State) ->
-    case do_send_recv(Data, State) of
+handle_call({command, Data}, _From, State = #state{sock = Sock, server = Server}) ->
+    case do_send_recv(Data, Sock, Server) of
         {tcp_error, Reason} ->
             {stop, Reason, {tcp_error, Reason}, State};
         Reply ->
@@ -102,7 +108,7 @@ code_change(_Old, State, _Extra) ->
 %%-----------------------------------------------------------------------------
 
 %% do sync send and recv 
-do_send_recv(Data, #state{sock = Sock, server = Server}) ->
+do_send_recv(Data, Sock, Server) ->
     case gen_tcp:send(Sock, Data) of
         ok -> % receive response
             case gen_tcp:recv(Sock, 0, ?RECV_TIMEOUT) of
@@ -119,13 +125,13 @@ do_send_recv(Data, #state{sock = Sock, server = Server}) ->
     end.
 
 %% do the auth
-do_auth(Server, Sock) ->
+do_auth(Sock, Server) ->
     Passwd = redis_servers:passwd(Server),
     case Passwd of
         "" ->
             ok;
         _ ->
-            ok = send(Sock, [<<"AUTH ">>, Passwd, ?CRLF])
+            do_send_recv([<<"AUTH ">>, Passwd, ?CRLF], Sock, Server)
     end.
 
 %% notify the redis_servers the client info

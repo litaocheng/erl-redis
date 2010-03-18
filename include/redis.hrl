@@ -44,6 +44,13 @@
 -define(CONN_TIMEOUT, 1000).
 -define(RECV_TIMEOUT, 1000).
 
+%% 
+%% about types and records
+%%
+-record(dist_server, {
+        data = []       % the data list
+    }).
+
 %% type defines
 -type key() :: binary() | [byte()].
 -type index() :: non_neg_integer().
@@ -61,7 +68,7 @@
 
 -type server() :: {inet_host(), inet_port()}.
 -type single_server() :: {inet_host(), inet_port(), pos_integer()}.
--type dist_server() :: any().
+-type dist_server() :: #dist_server{}.
 -type server_info() ::  single_server() | dist_server().
 
 -type server_type() :: 'undefined' | 'single' | 'dist'.

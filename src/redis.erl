@@ -41,10 +41,6 @@ single_server(Host, Port, Pool) ->
 dist_server(Dist) ->
     redis_servers:dist_server(Dist).
 
-%% @doc set the max connections for per server
-max_conn_per_server(_N) ->
-    false.
-
 %%
 %% Connection handling
 %%

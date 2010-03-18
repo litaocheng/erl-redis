@@ -17,3 +17,11 @@ now you can use the redis client in your application.
 the redis application is working like the standard erlang library. e.g. sasl, crypto, inets.
 you must call application:start(redis) when you want to use redis client.
 the erl redis application will manager the connections with redis server automatically.
+
+single server:
+    redis:single_server(localhost, 6379, 5), % single server with 5 connection
+    redis:exists("hello"). 
+
+consistent servers:
+    Dist = redis_dist:new([{localhost, 6379, 3}, {localhost, 6380, 5}]).
+    redis:dist_server(Dist).
