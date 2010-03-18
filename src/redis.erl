@@ -23,6 +23,16 @@
 i() ->
     ok.
 
+%% @doc return the server info
+-spec servers() -> [single_server()].
+servers() ->
+    redis_servers:server_info().
+
+%% @doc return the server config type
+-spec server_type() -> server_type().
+server_type() ->
+    redis_servers:server_type().
+
 %% @doc set single redis server
 -spec single_server(Host :: inet_host(), Port :: inet_port()) ->
     'ok' | {'error', any()}.
@@ -35,10 +45,11 @@ single_server(Host, Port) ->
 single_server(Host, Port, Pool) ->
     redis_servers:single_server({Host, Port, Pool}).
 
-%% @doc set the distributed servers info 
--spec dist_server(Dist :: dist_server()) ->
+%% @doc set the multi servers 
+-spec multi_servers(Servers :: [single_server()]) ->
     'ok' | {'error', any()}.
-dist_server(Dist) ->
+multi_servers(Servers) ->
+    Dist = redis_dist:new(Servers),
     redis_servers:dist_server(Dist).
 
 %%

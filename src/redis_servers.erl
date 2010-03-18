@@ -15,6 +15,7 @@
 
 -export([start/0, start_link/0]).
 -export([set_passwd/1, set_passwd/2, passwd/1]).
+-export([server_info/0, server_type/0]).
 -export([single_server/1, dist_server/1]).
 -export([get_client/1]).
 
@@ -59,6 +60,18 @@ set_passwd(Server, Passwd) ->
 passwd(Server) ->
     gen_server:call(?SERVER, {passwd, Server}).
 
+%% @doc get the server list info
+-spec server_info() ->
+    [single_server()].
+server_info() ->
+    gen_server:call(?SERVER, server_info).
+
+%% @doc get th server config type
+-spec server_type() ->
+    server_type().
+server_type() ->
+    gen_server:call(?SERVER, server_type).
+
 %% @doc set the single server info
 -spec single_server(SServer :: single_server()) ->
     'ok' | {'error', 'already_set'}.
@@ -96,6 +109,11 @@ handle_call({set_passwd, Server, Passwd}, _From, State) ->
 handle_call({passwd, Server}, _From, State) ->
     Reply = do_get_passwd(Server, State),
     {reply, Reply, State};
+handle_call(server_info, _From, State) ->
+    Reply = do_server_info(State),
+    {reply, Reply, State};
+handle_call(server_type, _From, State = #state{type = Type}) ->
+    {reply, Type, State};
 handle_call({single_server, SServer}, From, State) ->
     % the do_single_server is async
     State2 = do_single_server(SServer, From, State),
@@ -202,6 +220,17 @@ do_set_client(Server, Index, Pid, State = #state{type = dist, conns = Conns}) ->
     ?DEBUG2("(dist)set the redis client info, server:~p (~p) pid:~p", [Server, Index, Pid]),
     State#state{conns = set_conn(Server, Index, Pid, Conns)}.
 
+%% get server info
+do_server_info(#state{type = Type, server = S}) ->
+    case Type of
+        single ->
+            S;
+        dist ->
+            motown_dist:to_list(S);
+        undefined ->
+            []
+    end.
+
 %%
 %% about conns
 %% conns is an list, the element struct is 
@@ -210,6 +239,7 @@ do_set_client(Server, Index, Pid, State = #state{type = dist, conns = Conns}) ->
 %% Index is the pool index
 %% Pid is the redis_client pid
 %%
+
 %% is the conns is empty?
 is_conn_empty(Conns) ->
     Conns =:= [].

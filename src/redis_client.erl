@@ -68,7 +68,6 @@ init({Server = {Host, Port}, Index, Timeout}) ->
                     {stop, auth_failed}
             end;
         {error, Reason} ->
-            ?ERROR2("connect ~p:~p error", [Host, Port]),
             {stop, Reason}
     end.
 

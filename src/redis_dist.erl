@@ -74,7 +74,7 @@ hash_key(Key) ->
 
 %% do get server
 do_get_server(Key, #dist_server{data = List}) ->
-    [H | Tail] = List,
+    [H | _] = List,
     lists:foreach(
         fun
             ({Hash, Server}) when Hash >= Key -> % found

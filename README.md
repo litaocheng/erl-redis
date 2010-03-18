@@ -23,5 +23,5 @@ single server:
     redis:exists("hello"). 
 
 consistent servers:
-    Dist = redis_dist:new([{localhost, 6379, 3}, {localhost, 6380, 5}]).
-    redis:dist_server(Dist).
+    redis:multi_servers([{localhost, 6379, 3}, {localhost, 6380, 5}]).
+    redis:exists("hello").
