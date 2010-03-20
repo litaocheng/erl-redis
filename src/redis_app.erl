@@ -38,14 +38,14 @@ stop(_State) ->
 %% @doc the main supervisor and connection supervisor callbacks
 init([]) -> 
     ?DEBUG2("init supervisor", []),
-    Stragegy = {one_for_one, 10, 10},
+    Stragegy = {one_for_all, 10, 10},
 
-    ConnSup = {?CONN_SUP, {redis_conn_sup, start_link, []},
-                permanent, infinity, supervisor, [redis_conn_sup]},
     ServersMod = {redis_servers, {redis_servers, start_link, []},
                 permanent, 1000, worker, [redis_servers]},
+    ConnSup = {?CONN_SUP, {redis_conn_sup, start_link, []},
+                permanent, infinity, supervisor, [redis_conn_sup]},
 
-    {ok, {Stragegy, [ConnSup, ServersMod]}}.
+    {ok, {Stragegy, [ServersMod, ConnSup]}}.
 
 %%
 %% internal API

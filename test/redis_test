@@ -4,7 +4,9 @@
 -mode(compile).
 
 main(_Args) ->
+    code:add_path("../ebin"),
     redis_app:start(),
+    ok = redis:auth("litao"),
     ok = redis:single_server(localhost, 6379, 2),
     io:format("call exists api", []),
     Ret = redis:exists("key1"),

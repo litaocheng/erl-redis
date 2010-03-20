@@ -70,7 +70,8 @@
 -type single_server() :: {inet_host(), inet_port(), pos_integer()}.
 -type dist_server() :: #dist_server{}.
 -type server_info() ::  single_server() | dist_server().
-
 -type server_type() :: 'undefined' | 'single' | 'dist'.
+-type mode_info() :: {'single' | 'dist', [single_server()]}.
+
 
 -endif. % REDIS_HRL

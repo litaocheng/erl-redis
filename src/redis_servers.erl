@@ -13,10 +13,10 @@
 -behaviour(gen_server).
 -include("redis.hrl").
 
+-export([server_info/0, server_type/0]).
 -export([start/0, start_link/0]).
 -export([set_passwd/1, set_passwd/2, passwd/1]).
--export([server_info/0, server_type/0]).
--export([single_server/1, dist_server/1]).
+-export([set_mode/1]).
 -export([get_client/1]).
 
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -72,19 +72,11 @@ server_info() ->
 server_type() ->
     gen_server:call(?SERVER, server_type).
 
-%% @doc set the single server info
--spec single_server(SServer :: single_server()) ->
-    'ok' | {'error', 'already_set'}.
-single_server(SServer) ->
-    ?DEBUG2("set single server ~p", [SServer]),
-    gen_server:call(?SERVER, {single_server, SServer}).
-
-%% @doc set the dist server info
--spec dist_server(DServer :: dist_server()) ->
-    'ok' | {'error', 'already_set'}.
-dist_server(DServer) ->
-    ?DEBUG2("set dist server: ~p", [redis_dist:to_list(DServer)]),
-    gen_server:call(?SERVER, {dist_server, DServer}).
+%% @doc set the server mode
+-spec set_mode(Mode :: tuple()) -> 'ok'.
+set_mode(Mode) ->
+    ?DEBUG2("set servers mode ~p", [Mode]),
+    gen_server:call(?SERVER, {set_mode, Mode}).
 
 %% @doc get the specify server
 -spec get_client(Key :: key()) ->
@@ -98,6 +90,7 @@ get_client(Key) ->
 init(_Args) ->
     ?DEBUG2("init the redis_servers", []),
     random:seed(now()),
+    process_flag(trap_exit, true),
     {ok, #state{}}.
 
 handle_call({set_passwd_all, Passwd}, _From, State) ->
@@ -114,14 +107,9 @@ handle_call(server_info, _From, State) ->
     {reply, Reply, State};
 handle_call(server_type, _From, State = #state{type = Type}) ->
     {reply, Type, State};
-handle_call({single_server, SServer}, From, State) ->
-    % the do_single_server is async
-    State2 = do_single_server(SServer, From, State),
-    {noreply, State2};
-handle_call({dist_server, DServer}, From, State) ->
-    % the do_dist_server is async
-    State2 = do_dist_server(DServer, From, State),
-    {noreply, State2};
+handle_call({set_mode, {Mode, Servers}}, _From, State) ->
+    {Reply, State2} = do_set_mode(Mode, Servers, State),
+    {reply, Reply, State2};
 handle_call({get_client, Key}, From, State) ->
     do_get_client(Key, From, State),
     {noreply, State};
@@ -152,13 +140,8 @@ code_change(_Old, State, _Extra) ->
 %%-----------------------------------------------------------------------------
 
 %% set the passwd to all the servers
-do_set_all_passwd(Passwd, 
-        State = #state{type = single, server = {Host, Port, _}}) ->
-    {ok, State#state{auth = [{{Host, Port}, Passwd}]}};
-do_set_all_passwd(Passwd,
-        State = #state{type = dist, server = DServer}) ->
-    Servers = redis_dist:to_list(DServer),
-    {ok, State#state{auth = [{{Host, Port}, Passwd} || {Host, Port, _} <- Servers]}}.
+do_set_all_passwd(Passwd, State) ->
+    {ok, State#state{auth = [{'$all', Passwd}]}}.
 
 %% set the passwd
 do_set_passwd(Server, Passwd, State = #state{auth = Auth}) ->
@@ -167,30 +150,16 @@ do_set_passwd(Server, Passwd, State = #state{auth = Auth}) ->
 
 %% get the passwd
 do_get_passwd(Server, #state{auth = Auth}) ->
-    proplists:get_value(Server, Auth, "").
+    case proplists:get_value(Server, Auth) of
+        undefined ->
+            proplists:get_value('$all', Auth, "");
+        Passwd ->
+            Passwd
+    end.
 
-%% set the signle server info
-do_single_server(SServer, From,
-        State = #state{type = undefined, conns = []}) ->
-    % setup the connections in new process
-    setup_connections([SServer], From),
-    % update the server field
-    State#state{type = single, server = SServer};
-do_single_server(_SServer, From, State = #state{type = Type}) ->
-    ?ERROR2("you'd set server info, type:~p!", [Type]),
-    gen_server:reply(From, {error, already_set}),
-    State.
-
-%% set the dist server info
-do_dist_server(DServer, From, State = #state{type = undefined}) ->
-    % setup the connections in new process
-    setup_connections(redis_dist:to_list(DServer), From),
-    % update the server field
-    State#state{type = dist, server = DServer};
-do_dist_server(_DServer, From, State = #state{type = Type}) ->
-    ?ERROR2("you'd set server info, type:~p!", [Type]),
-    gen_server:reply(From, {error, already_set}),
-    State.
+%% set the signle mode
+do_set_mode(Mode, Servers, State = #state{type = undefined}) ->
+    {ok, State#state{type = Mode, server = Servers}}.
 
 %% get the client
 do_get_client(_Key, From, #state{type = single, conns = Conns}) ->
@@ -275,53 +244,39 @@ set_conn(Server, Index, Pid, Conns) ->
             lists:keyreplace(Server, 1, Conns, {Server, Pids2})
     end.
 
-%% spawn a new process to call the redis_conn_sup:connect/1 function.
-%% thus, we will not block the redis_servers process. when the redis_client
-%% process created by redis_conn_sup connect the redis server ok, 
-%% it will notify the redis_servers to update the conns info
-setup_connections(Servers, From) ->
-    F = fun() -> 
-        ?DEBUG2("setup the connections ~p", [Servers]),
-        Errors =
-        lists:foldl(
-            fun({Host, Port, Pool}, Acc) ->
-                case catch connect_server(Host, Port, Pool) of
-                    ok ->
-                        Acc;
-                    {error, Reason} ->
-                        [{{Host, Port}, {error, Reason}} | Acc]
-                end
-            end,
-        [], Servers),
-
-        Reply = 
-        case Errors of
-            [] ->
-                ok;
-            [_|_] ->
-                Errors
-        end,
-        gen_server:reply(From, Reply)
-    end,
-    proc_lib:spawn(F),
-    ok.
-
-%% connect one server
-connect_server(Host, Port, Pool) ->
-   [begin 
-        case redis_conn_sup:connect(Host, Port, N) of
-            {error, Reason} ->
-                ?ERROR2("make the ~p connection to redis server ~p:~p error:~p", 
-                    [N, Host, Port, Reason]),
-                throw({error, Reason});
-            {ok, _Client} ->
-                ok
-        end
-    end || N <- lists:seq(1, Pool)],
-    ok.
-
 
 -ifdef(TEST).
+
+passwd_test_() ->
+    Host1 = {localhost, 6379},
+    Server1 = {localhost, 6379, 2},
+    Host2 = {localhost, 6380},
+    Server2 = {localhost, 6380, 4},
+    Host3 = {localhost, 6381},
+
+    Dist = redis_dist:new([Server1, Server2]),
+    State0 = #state{},
+    StateS = #state{type = single, server = Server1},
+    StateD = #state{type = dist,   server = Dist},
+    Pwd = "yes",
+
+    [
+        ?_assertEqual({ok, State0#state{auth = [{'$all', Pwd}]}}, 
+                do_set_all_passwd(Pwd, State0)),
+        ?_assertEqual({ok, StateS#state{auth = [{'$all', Pwd}]}}, 
+                do_set_all_passwd(Pwd, StateS)),
+        ?_assertEqual({ok, StateD#state{auth = [{'$all', Pwd}]}}, 
+                do_set_all_passwd(Pwd, StateD)),
+
+        ?_assertEqual({ok, StateS#state{auth = [{Host1, "pwd"}]}}, do_set_passwd(Host1, "pwd", StateS)),
+        ?_assertEqual({ok, StateD#state{auth = [{Host2, "pwd2"}]}}, do_set_passwd(Host2, "pwd2", StateD)),
+
+        ?_assertEqual(Pwd, do_get_passwd(Host1, #state{auth = [{Host1, Pwd}]})),
+        ?_assertEqual(Pwd, do_get_passwd(Host2, #state{auth = [{Host1, Pwd}, {Host2, Pwd}]})),
+        ?_assertEqual("", do_get_passwd(Host3, #state{auth = []})),
+        ?_assertEqual("yes", do_get_passwd(Host3, #state{auth = [{'$all', "yes"}]})),
+        ?_assertEqual("pwd1", do_get_passwd(Host3, #state{auth = [{'$all', "yes"}, {Host3, "pwd1"}]}))
+    ].
 
 
 -endif.

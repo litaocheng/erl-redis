@@ -43,14 +43,36 @@ single_server(Host, Port) ->
 -spec single_server(Host :: inet_host(), Port :: inet_port(), Pool :: pos_integer()) ->
     'ok' | {'error', any()}.
 single_server(Host, Port, Pool) ->
-    redis_servers:single_server({Host, Port, Pool}).
+    case get_mode_env() of
+        undefined ->
+            Server = {Host, Port, Pool},
+            Mode = {single, Server},
+            % setup the connections in new process
+            ok = redis_conn_sup:setup_connections(Mode),
+            ok = set_mode_env(Mode);
+        _ ->
+            {error, already_set}
+    end.
 
 %% @doc set the multi servers 
 -spec multi_servers(Servers :: [single_server()]) ->
     'ok' | {'error', any()}.
 multi_servers(Servers) ->
     Dist = redis_dist:new(Servers),
-    redis_servers:dist_server(Dist).
+    case get_mode_env() of
+        undefined ->
+            Mode = {dist, Dist},
+            % setup the connections in new process
+            ok = redis_conn_sup:setup_connections(Mode),
+            ok = set_mode_env(Mode);
+        _ ->
+            {error, already_set}
+    end.
+
+%% @doc get server mode from application env
+-spec get_mode_env() -> 'undefined' | {'ok', mode_info()}.
+get_mode_env() ->
+    application:get_env(redis, server_mode_info).
 
 %%
 %% Connection handling
@@ -226,9 +248,15 @@ decr(Key, N) ->
 %%
 %%------------------------------------------------------------------------------
 
-%% do the call
+%% 
 call(Cmd) ->
-    redis_client:send(ok, Cmd).
+    ok.
+
+%% do the call to all the servers
+call_all(Cmd) ->
+    {ok, Clients} = redis_servers:get_all_client(),
+    ?DEBUG2("send cmd ~p by clients:~p", [Cmd, Clients]),
+    redis_client:multi_send(Clients, Cmd).
 
 %% do the call with key
 call_key(Type, Key) ->
@@ -260,6 +288,11 @@ single_line(Parts) ->
     [?CRLF_BIN],
     Parts),
     Line.
+
+%% set server mode to application env
+set_mode_env(Mode) ->
+    application:set_env(redis, server_mode_info, Mode).
+
 
 -ifdef(TEST).
 
