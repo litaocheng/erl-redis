@@ -33,7 +33,8 @@ parse_reply(<<"*", Rest/binary>>, Sock) ->
 %% @doc return a list of tokens in string, separated by the characters
 %%  in Separatorlist
 -spec tokens(S :: binary(), Sep :: char()) -> [binary()].
-tokens(S, Sep) ->
+tokens(S, Sep) when is_integer(Sep) ->
+    ?DEBUG2("string is ~p sep is ~p", [S, Sep]),
     tokens1(S, Sep, []).
 
 %%
@@ -64,7 +65,15 @@ parse_status_reply(<<"OK\r\n">>, _Sock) ->
 parse_status_reply(<<"QUEUED\r\n">>, _Sock) ->
     queued;
 parse_status_reply(<<"PONG\r\n">>, _Sock) ->
-    pong.
+    pong;
+parse_status_reply(<<"none\r\n">>, _Sock) ->
+    none;
+parse_status_reply(<<"string\r\n">>, _Sock) ->
+    string;
+parse_status_reply(<<"list\r\n">>, _Sock) ->
+    list;
+parse_status_reply(<<"set\r\n">>, _Sock) ->
+    set.
 
 %% parse error reply
 parse_error_reply(Bin, _Sock) when is_binary(Bin) ->
@@ -83,10 +92,10 @@ parse_intger_reply(Bin, _Sock) ->
 %% parse bulk reply
 parse_bulk_reply(<<"-1\r\n">>, _Sock) ->
     none;
-parse_bulk_reply(Bin, {_, Sock}) ->
+parse_bulk_reply(Bin, Sock) ->
     N = b2n(Bin),
     ok = inet:setopts(Sock, [{packet, raw}]),
-    <<Val:N, _/binary>> = recv_n(Sock, N + 2),
+    <<Val:N/bytes, _/binary>> = recv_n(Sock, N + 2),
     ok = inet:setopts(Sock, [{packet, line}]),
     Val.
      

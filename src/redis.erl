@@ -90,6 +90,9 @@ auth(Server, Passwd) ->
 %%
 %% commands operating on all the kind of values
 %%
+
+%% @doc test if the specified key exists
+%% O(1)
 -spec exists(Key :: key()) -> 
     boolean().
 exists(Key) ->
@@ -98,33 +101,50 @@ exists(Key) ->
        0 -> false
     end.
 
--spec delete(Key :: key()) -> 
-    'ok' | 'fail'.
+%% @doc remove the specified key, return ture if deleted, 
+%% otherwise return false
+%% O(1)
+-spec delete(Keys :: [key()]) -> 
+    non_neg_integer().
 delete(Key) ->
-    int_return(
-        call(single_line(<<"DEL">>, Key))).
+    case call_key(<<"DEL">>, Key) of
+        1 -> true;
+        0 -> false
+    end.
 
+%% @doc remove the specified keys, return the number of
+%% keys removed.
+%% O(1)
 -spec multi_delete(Keys :: [key()]) -> 
     'ok' | non_neg_integer().
 multi_delete(Keys) ->
-    Len = length(Keys),
-    case call(single_line([<<"DEL">> | Keys])) of
-        Len ->
-            ok;
-        N ->
-            N
-    end.
+    lists:sum(call_keys(<<"DEL">>, Keys)).
 
+%% @doc return the type of the value stored at key
+%% O(1)
 -spec type(Key :: key()) -> 
     value_type().
 type(Key) ->
-    call(single_line(<<"TYPE">>, Key)).
+    call_key(<<"TYPE">>, Key).
 
+%% @doc return the keys list matching a given pattern,
+%% if all the servers reply the successed, return  {ok, [key()]},
+%% otherwise return {error, [key()], [pid()]}, the third element in
+%% return tuple is the bad clients.
+%% O(n)
 -spec keys(Pattern :: pattern()) -> 
-    [key()].
+    {ok, [key()]} | {error, [key()], [pid()]}.
 keys(Pattern) ->
-    Bin = call(single_line(<<"KEYS">>, Pattern)),
-    redis_proto:tokens(Bin, ?SEP_BIN).
+    {Replies, BadClients} = call_all(single_line(<<"KEYS">>, Pattern)),
+    
+    Keys =
+    lists:append([redis_proto:tokens(R, ?SEP) || {_Pid, R} <- Replies]),
+    case BadClients of
+        [] ->
+            {ok, Keys};
+        [_|_] ->
+            {ok, Keys, BadClients}
+    end.
 
 -spec random_key() -> 
     key() | nil().
@@ -254,7 +274,7 @@ call(Cmd) ->
 
 %% do the call to all the servers
 call_all(Cmd) ->
-    {ok, Clients} = redis_servers:get_all_client(),
+    {ok, Clients} = redis_servers:get_all_clients(),
     ?DEBUG2("send cmd ~p by clients:~p", [Cmd, Clients]),
     redis_client:multi_send(Clients, Cmd).
 
@@ -263,6 +283,10 @@ call_key(Type, Key) ->
     {ok, Client} = redis_servers:get_client(Key),
     ?DEBUG2("send cmd [~p, ~p]  by client:~p", [Type, Key, Client]),
     redis_client:send(Client, single_line(Type, Key)).
+
+%% do the call with keys
+call_keys(Type, Keys) ->
+    [call_key(Type, Key) || Key <- Keys].
 
 %% convert status code to return
 status_return(<<"OK">>) -> ok;

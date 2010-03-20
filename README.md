@@ -19,9 +19,13 @@ you must call application:start(redis) when you want to use redis client.
 the erl redis application will manager the connections with redis server automatically.
 
 single server:
-    redis:single_server(localhost, 6379, 5), % single server with 5 connection
-    redis:exists("hello"). 
+    redis_app:start(),
+    ok = redis:auth("pwd"),
+    ok = redis:single_server(localhost, 6379, 5), % single server with 5 connection
+    redis:exists("key1"). 
 
 consistent servers:
+    redis_app:start(),
+    ok = redis:auth("pwd"),
     redis:multi_servers([{localhost, 6379, 3}, {localhost, 6380, 5}]).
     redis:exists("hello").

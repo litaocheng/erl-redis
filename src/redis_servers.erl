@@ -17,7 +17,7 @@
 -export([start/0, start_link/0]).
 -export([set_passwd/1, set_passwd/2, passwd/1]).
 -export([set_mode/1]).
--export([get_client/1]).
+-export([get_client/1, get_all_clients/0]).
 
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
                             terminate/2, code_change/3]).
@@ -78,11 +78,17 @@ set_mode(Mode) ->
     ?DEBUG2("set servers mode ~p", [Mode]),
     gen_server:call(?SERVER, {set_mode, Mode}).
 
-%% @doc get the specify server
+%% @doc get the client
 -spec get_client(Key :: key()) ->
     {'ok', pid()} | {'error', any()}.
 get_client(Key) ->
     gen_server:call(?SERVER, {get_client, Key}).
+
+%% @doc get all the clients
+-spec get_all_clients() ->
+    {ok, [pid()]}.
+get_all_clients() ->
+    gen_server:call(?SERVER, get_all_clients).
 
 %%
 %% gen_server callbacks
@@ -110,9 +116,12 @@ handle_call(server_type, _From, State = #state{type = Type}) ->
 handle_call({set_mode, {Mode, Servers}}, _From, State) ->
     {Reply, State2} = do_set_mode(Mode, Servers, State),
     {reply, Reply, State2};
-handle_call({get_client, Key}, From, State) ->
-    do_get_client(Key, From, State),
-    {noreply, State};
+handle_call({get_client, Key}, _From, State) ->
+    Reply = do_get_client(Key, State),
+    {reply, Reply, State};
+handle_call(get_all_clients, _From, State) ->
+    Reply = do_get_all_clients(State),
+    {reply, Reply, State};
 handle_call(_Msg, _From, State) ->
     {noreply, State}.
 
@@ -162,24 +171,27 @@ do_set_mode(Mode, Servers, State = #state{type = undefined}) ->
     {ok, State#state{type = Mode, server = Servers}}.
 
 %% get the client
-do_get_client(_Key, From, #state{type = single, conns = Conns}) ->
+do_get_client(_Key, #state{type = single, conns = Conns}) ->
     ?DEBUG2("(single)get client for key: ~p", [_Key]),
     case is_conn_empty(Conns) of
         true ->
-            gen_server:reply(From, {error, no_server});
+            {error, no_server};
         false ->
-            Conn = get_conn(Conns),
-            gen_server:reply(From, {ok, Conn})
+            {ok, get_conn(Conns)}
     end;
-do_get_client(Key, From, #state{type = dist, conns = Conns, server = DServer}) ->
+do_get_client(Key, #state{type = dist, conns = Conns, server = DServer}) ->
     {ok, Server} = redis_dist:get_server(Key, DServer),
     ?DEBUG2("(dist)get client with server:~p for key:~p ", [Server, Key]),
     case find_conn(Server, Conns) of
         none ->
-            gen_server:reply(From, {error, no_server});
+            {error, no_server};
         {ok, Conn} ->
-            gen_server:reply(From, {ok, Conn})
+            {ok, Conn}
     end.
+
+%% get all the clients
+do_get_all_clients(#state{type = single, conns = Conns}) ->
+    {ok, [random_conn(Pids) || {Server, Pids} <- Conns]}.
 
 %% set the client info
 do_set_client(Server, Index, Pid, State = #state{type = single, conns = Conns}) ->
