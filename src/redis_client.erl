@@ -12,8 +12,9 @@
 -vsn('0.1').
 -behaviour(gen_server).
 -include("redis.hrl").
+
 -export([start_link/3]).
--export([get_sock/1]).
+-export([get_server/1, get_sock/1]).
 -export([send/2, multi_send/2, multi_send/3]).
 
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -29,6 +30,7 @@
 
 -define(TCP_OPTS, [inet, binary, {active, false}, 
             {packet, line}, {nodelay, true},
+            {recbuf, 102400},
             {send_timeout, 5000}, {send_timeout_close, true}]).
 
 
@@ -38,6 +40,11 @@
 start_link(Server, Index, Timeout) ->
     ?DEBUG2("start_link redis_client ~p (~p)", [Server, Index]),
     gen_server:start_link(?MODULE, {Server, Index, Timeout}, []).
+
+%% @doc get the server info
+-spec get_server(Client :: pid()) -> server().
+get_server(Client) ->
+    gen_server:call(Client, get_server).
 
 %% @doc return the socket
 -spec get_sock(Client :: pid()) -> {'ok', port()}.
@@ -151,9 +158,6 @@ do_auth(Sock, Server) ->
 set_client(Server, Index, Pid) ->
     gen_server:cast(?REDIS_SERVERS, {set_client, Server, Index, Pid}).
 
-%% get the server info
-get_server(Client) ->
-    gen_server:call(Client, get_server).
 
 %%
 %% about multi send

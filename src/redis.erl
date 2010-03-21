@@ -23,6 +23,13 @@
 i() ->
     ok.
 
+%% @doc return the redis version info
+%% first element is the redis client version,
+%% second element is the lowest redis server version supported
+-spec vsn() -> {string(), string()}.
+vsn() ->
+    {get_app_vsn(), "1.2.5"}.
+
 %% @doc return the server info
 -spec servers() -> [single_server()].
 servers() ->
@@ -96,10 +103,7 @@ auth(Server, Passwd) ->
 -spec exists(Key :: key()) -> 
     boolean().
 exists(Key) ->
-    case call_key(<<"EXISTS">>, Key) of
-       1 -> true;
-       0 -> false
-    end.
+    int_return(call_key(<<"EXISTS">>, Key)).
 
 %% @doc remove the specified key, return ture if deleted, 
 %% otherwise return false
@@ -107,10 +111,7 @@ exists(Key) ->
 -spec delete(Keys :: [key()]) -> 
     non_neg_integer().
 delete(Key) ->
-    case call_key(<<"DEL">>, Key) of
-        1 -> true;
-        0 -> false
-    end.
+    int_return(call_key(<<"DEL">>, Key)).
 
 %% @doc remove the specified keys, return the number of
 %% keys removed.
@@ -133,72 +134,121 @@ type(Key) ->
 %% return tuple is the bad clients.
 %% O(n)
 -spec keys(Pattern :: pattern()) -> 
-    {ok, [key()]} | {error, [key()], [pid()]}.
+    {[key()], [server()]}.
 keys(Pattern) ->
-    {Replies, BadClients} = call_all(single_line(<<"KEYS">>, Pattern)),
-    
-    Keys =
-    lists:append([redis_proto:tokens(R, ?SEP) || {_Pid, R} <- Replies]),
-    case BadClients of
-        [] ->
-            {ok, Keys};
-        [_|_] ->
-            {ok, Keys, BadClients}
-    end.
+    {Replies, BadServers} = call_all(cmd_line(<<"KEYS">>, Pattern)),
+    Keys = lists:append([redis_proto:tokens(R, ?SEP) || {_Server, R} <- Replies]),
+    {Keys, BadServers}.
 
+%% @doc return a randomly selected key from the currently selected DB
+%% O(1)
 -spec random_key() -> 
-    key() | nil().
+    key() | null().
 random_key() ->
-    call(<<"RANDOMKEY",?CRLF_BIN/binary>>).
+    F = 
+    fun
+        (nil) ->
+            false;
+        (_) ->
+            true
+    end,
+    catch call_any(cmd_line(<<"RANDOMKEY">>), F).
 
+%% @doc atmoically renames key OldKey to  NewKey
+%% O(1)
+%% ???
 -spec rename(OldKey :: key(), NewKey :: key()) -> 
     'ok'.
 rename(OldKey, NewKey) ->
-    call(single_line(<<"RENAME">>, OldKey, NewKey)).
+    call(cmd_line(<<"RENAME">>, OldKey, NewKey)).
 
+%% ???
 -spec rename_not_exists(OldKey :: key(), NewKey :: key()) -> 
     'ok' | 'fail' | error_reply().
 rename_not_exists(OldKey, NewKey) ->
     int_return(
-        call(single_line(<<"RENAMENX">>, OldKey, NewKey))).
-
+        call(cmd_line(<<"RENAMENX">>, OldKey, NewKey))).
+%% @doc return the nubmer of keys in all the currently selected database
+%% O(1)
 -spec dbsize() -> 
-    integer().
+    {integer() , [server()]}.
 dbsize() ->
-    call(<<"DBSIZE", ?CRLF_BIN/binary>>).
+    {Replies, BadServers} = call_all(cmd_line(<<"DBSIZE">>)),
+    
+    Size = 
+    lists:foldl(
+        fun({_Server, R}, Acc) ->
+            R + Acc
+        end,
+    0, Replies),
+    {Size, BadServers}.
 
+%% @doc set a timeout on the specified key, after the Time the Key will
+%% automatically deleted by server.
+%% O(1)
 -spec expire(Key :: key(), Time :: second()) -> 
-    'ok' | error_reply().
+    boolean().
 expire(Key, Time) ->
     int_return(
-        call(single_line(<<"EXPIRE">>, Key, ?N2S(Time)))).
+        call_key(<<"EXPIRE">>, Key, ?N2S(Time))).
 
--spec ttl(Key :: key()) -> 
-    integer() | error_reply().
-ttl(Key) ->
-    call(single_line(<<"TTL">>, Key)).
-
--spec select(Index :: index()) ->
-    'ok' | error_reply().
-select(Index) ->
-    status_return(
-        call(single_line(<<"SELECT">>, ?N2S(Index)))).
-
--spec move(Key :: key(), DBIndex :: index()) ->
-    'ok' | 'fail'.
-move(Key, DBIndex) ->
+%% @doc set a unix timestamp on the specified key, the Key will
+%% automatically deleted by server at the TimeStamp in the future.
+%% O(1)
+-spec expire_at(Key :: key(), TimeStamp :: timestamp()) -> 
+    boolean().
+expire_at(Key, TimeStamp) ->
+    Str = ?N2S(TimeStamp),
     int_return(
-        call(single_line(<<"MOVE">>, Key, ?N2S(DBIndex)))).
+        call_key(<<"EXPIREAT">>, Key, Str)).
 
--spec flush_db() ->
-    'ok'.
+%% @doc return the remaining time to live in seconds of a key that
+%% has an EXPIRE set
+%% O(1)
+-spec ttl(Key :: key()) -> non_neg_integer().
+ttl(Key) ->
+    call_key(<<"TTL">>, Key).
+
+%% @doc select the DB with have the specified zero-based numeric index
+-spec select(Index :: index()) ->
+    'ok' | {'error', [server()]}.
+select(Index) ->
+    {_Replies, BadServers} = call_all(cmd_line(<<"SELECT">>, ?N2S(Index))),
+    case BadServers of
+        [] ->
+            ok;
+        [_|_] ->
+            {error, BadServers}
+    end.
+
+%% @doc move the specified key  from the currently selected DB to the specified
+%% destination DB
+-spec move(Key :: key(), DBIndex :: index()) ->
+    boolean() | error_reply().
+move(Key, DBIndex) ->
+    int_may_bool(
+        call_key(<<"MOVE">>, Key, ?N2S(DBIndex))).
+
+%% @doc delete all the keys of the currently selected DB
+-spec flush_db() -> 'ok' | {'error', [server()]}.
 flush_db() ->
-    status_return(call(single_line(<<"FLUSHDB", ?CRLF_BIN/binary>>))).
-
--spec flush_all() ->
-    'ok'.
+    {Replies, BadServers} = call_all(cmd_line(<<"FLUSHDB">>)),
+    case BadServers of
+        [] ->
+            ok;
+        [_|_] ->
+            {error, BadServers}
+    end.
+            
+-spec flush_all() -> 'ok' | {'error', [server()]}.
 flush_all() ->
-    status_return(call(single_line(<<"FLUSHALL", ?CRLF_BIN/binary>>))).
+    {Replies, BadServers} = call_all(cmd_line(<<"FLUSHALL">>)),
+    case BadServers of
+        [] ->
+            ok;
+        [_|_] ->
+            {error, BadServers}
+    end.
 
 %%
 %% commands operating on string values
@@ -207,60 +257,60 @@ flush_all() ->
     'ok'.
 set(Key, Val) ->
     status_return(
-        call(single_line(<<"SET">>, Key, Val))).
+        call(cmd_line(<<"SET">>, Key, Val))).
     
 -spec get(Key :: key()) ->
     nil() | string().
 get(Key) ->
-    call(single_line(<<"GET">>, Key)).
+    call(cmd_line(<<"GET">>, Key)).
 
 -spec getset(Key :: key(), Val :: string()) ->
     nil() | {'ok', string()} | error_reply(). 
 getset(Key, Val) ->
-    call(single_line(<<"GETSET">>, Key, Val)).
+    call(cmd_line(<<"GETSET">>, Key, Val)).
 
 -spec multi_get(Keys :: [key()]) ->
     [string() | nil()].
 multi_get(Keys) ->
-    call(single_line([<<"MGET">> | Keys])).
+    call(cmd_line([<<"MGET">> | Keys])).
 
 -spec set_not_exists(Key :: key(), Val :: string()) -> 
     'ok' | 'fail' | error_reply().
 set_not_exists(Key, Val) ->
     int_return(
-        call(single_line(<<"SETNX">>, Key, Val))).
+        call(cmd_line(<<"SETNX">>, Key, Val))).
 
 -spec multi_set(Keys :: [key()]) ->
     'ok'.
 multi_set(Keys) ->
     status_return(
-        call(single_line([<<"MSET">> | Keys]))).
+        call(cmd_line([<<"MSET">> | Keys]))).
 
 -spec multi_set_not_exists(Keys :: [key()]) ->
     'ok' | 'fail'.
 multi_set_not_exists(Keys) ->
     int_return(
-        call(single_line([<<"MSETNX">> | Keys]))).
+        call(cmd_line([<<"MSETNX">> | Keys]))).
 
 -spec incr(Key :: key()) -> 
     integer().
 incr(Key) ->
-    call(single_line(<<"INCR">>, Key)).
+    call(cmd_line(<<"INCR">>, Key)).
 
 -spec incr(Key :: key(), N :: integer()) -> 
     integer().
 incr(Key, N) ->
-    call(single_line(<<"INCRBY">>, Key, ?N2S(N))).
+    call(cmd_line(<<"INCRBY">>, Key, ?N2S(N))).
 
 -spec decr(Key :: key()) -> 
     integer().
 decr(Key) ->
-    call(single_line(<<"DECR">>, Key)).
+    call(cmd_line(<<"DECR">>, Key)).
 
 -spec decr(Key :: key(), N :: integer()) -> 
     integer().
 decr(Key, N) ->
-    call(single_line(<<"DECRBY">>, Key, ?N2S(N))).
+    call(cmd_line(<<"DECRBY">>, Key, ?N2S(N))).
 
 %%------------------------------------------------------------------------------
 %%
@@ -269,41 +319,77 @@ decr(Key, N) ->
 %%------------------------------------------------------------------------------
 
 %% 
-call(Cmd) ->
+call(_Cmd) ->
     ok.
 
 %% do the call to all the servers
 call_all(Cmd) ->
     {ok, Clients} = redis_servers:get_all_clients(),
-    ?DEBUG2("send cmd ~p by clients:~p", [Cmd, Clients]),
-    redis_client:multi_send(Clients, Cmd).
+    ?DEBUG2("call all send cmd ~p by clients:~p", [Cmd, Clients]),
+    {Replies, BadClients} = redis_client:multi_send(Clients, Cmd),
+    {[{redis_client:get_server(Pid), R} || {Pid, R} <- Replies],
+     [redis_client:get_server(Pid) || Pid <- BadClients]}.
+
+
+%% do the call to any one server
+call_any(Cmd, F) ->
+    {ok, Clients} = redis_servers:get_all_clients(),
+    ?DEBUG2("call any send cmd ~p by clients:~p", [Cmd, Clients]),
+    [V | _] =
+    [begin
+        Ret = redis_client:send(Client, Cmd),
+        case F(Ret) of
+            true ->
+                throw(Ret);
+            false ->
+                Ret
+        end
+    end || Client <- Clients],
+    V.
 
 %% do the call with key
 call_key(Type, Key) ->
+    do_call_key(Key, cmd_line(Type, Key)).
+call_key(Type, Key, Arg1) ->
+    do_call_key(Key, cmd_line(Type, Key, Arg1)).
+call_key(Type, Key, Arg1, Arg2) ->
+    do_call_key(Key, cmd_line(Type, Key, Arg1, Arg2)).
+do_call_key(Key, Cmd) ->
     {ok, Client} = redis_servers:get_client(Key),
-    ?DEBUG2("send cmd [~p, ~p]  by client:~p", [Type, Key, Client]),
-    redis_client:send(Client, single_line(Type, Key)).
+    ?DEBUG2("call key send cmd ~p  by client:~p", [Cmd, Client]),
+    redis_client:send(Client, Cmd).
 
 %% do the call with keys
 call_keys(Type, Keys) ->
     [call_key(Type, Key) || Key <- Keys].
+
 
 %% convert status code to return
 status_return(<<"OK">>) -> ok;
 status_return(S) -> S.
 
 %% convert integer to return
-int_return(0) -> fail;
-int_return(1) -> ok.
+int_return(0) -> false;
+int_return(1) -> true.
+
+int_may_bool(0) -> false;
+int_may_bool(1) -> true;
+int_may_bool(V) -> V.
 
 %% generate the single line
-single_line(Type, Arg) ->
+cmd_line(Type) ->
+    [Type, ?CRLF_BIN].
+
+cmd_line(Type, Arg) ->
     [Type, ?SEP_BIN, Arg, ?CRLF_BIN].
 
-single_line(Type, Arg1, Arg2) ->
+cmd_line(Type, Arg1, Arg2) ->
     [Type, ?SEP_BIN, Arg1, ?SEP_BIN, Arg2, ?CRLF_BIN].
 
-single_line(Parts) ->
+cmd_line(Type, Arg1, Arg2, Arg3) ->
+    [Type, ?SEP_BIN, Arg1, ?SEP_BIN, Arg2, ?SEP_BIN, Arg3, ?CRLF_BIN].
+
+cmd_line_list(Parts) ->
     [?SEP_BIN | Line] = 
     lists:foldr(
         fun(P, Acc) ->
@@ -317,18 +403,24 @@ single_line(Parts) ->
 set_mode_env(Mode) ->
     application:set_env(redis, server_mode_info, Mode).
 
+%% get the application vsn
+%% return 'undefined' | string().
+get_app_vsn() ->
+    {ok, App} = application:get_application(),
+    {ok, Vsn} = application:get_key(App, vsn),
+    Vsn.
 
 -ifdef(TEST).
 
 l2b(Line) ->
     iolist_to_binary(Line).
 
-single_line_test_() ->
+cmd_line_test_() ->
     [
-        ?_assertEqual(<<"EXISTS key1\r\n">>, l2b(single_line(<<"EXISTS">>, "key1"))),
-        ?_assertEqual(<<"EXISTS key2\r\n">>, l2b(single_line("EXISTS", "key2"))),
-        ?_assertEqual(<<"type key1 key2\r\n">>, l2b(single_line("type", "key1", <<"key2">>))),
-        ?_assertEqual(<<"type key1 key2\r\n">>, l2b(single_line(["type", <<"key1">>, "key2"]))),
+        ?_assertEqual(<<"EXISTS key1\r\n">>, l2b(cmd_line(<<"EXISTS">>, "key1"))),
+        ?_assertEqual(<<"EXISTS key2\r\n">>, l2b(cmd_line("EXISTS", "key2"))),
+        ?_assertEqual(<<"type key1 key2\r\n">>, l2b(cmd_line("type", "key1", <<"key2">>))),
+        ?_assertEqual(<<"type key1 key2\r\n">>, l2b(cmd_line(["type", <<"key1">>, "key2"]))),
 
         ?_assert(true)
     ].

@@ -39,7 +39,7 @@ end_per_testcase(Name, Config) ->
 
 all() -> 
     [
-    cmd_common,
+    cmd_generic,
     cmd_string,
     cmd_list,
     cmd_set,
@@ -52,13 +52,25 @@ all() ->
 
 test_dummy(_Config) -> ok.
 
-%% test common commands
-cmd_common(Config) ->
+%% test generic commands
+cmd_generic(Config) ->
     bool(?P(redis:exists("key1"))),
     bool(?P(redis:delete("Key2"))),
     non_neg_int(?P(redis:multi_delete(["Key3", "key4"]))),
     atom(?P(redis:type("key1"))),
-    {ok, [_|_]} = ?P(redis:keys("key*")),
+    {_, _} = ?P(redis:keys("key*")),
+    ?P(redis:random_key()),
+    ?P(redis:dbsize()),
+    bool(?P(redis:expire("key333", 100000))),
+    bool(?P(redis:expire_at("key333", 1289138070))),
+    int(?P(redis:ttl("key333"))),
+    bool(?P(redis:move("key333", 1))),
+    ok = ?P(redis:select(1)),
+    ?P(redis:move("key333", 0)),
+    ok = ?P(redis:select(0)),
+
+    ok = ?P(redis:flush_db()),
+    ok = ?P(redis:flush_all()),
 
     ok.
 
@@ -71,5 +83,7 @@ bool(true) -> ok;
 bool(false) -> ok.
 
 non_neg_int(N) when is_integer(N), N >= 0 -> ok.
+
+int(N) when is_integer(N) -> ok.
 
 atom(A) when is_atom(A) -> ok.

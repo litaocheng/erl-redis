@@ -73,12 +73,16 @@ parse_status_reply(<<"string\r\n">>, _Sock) ->
 parse_status_reply(<<"list\r\n">>, _Sock) ->
     list;
 parse_status_reply(<<"set\r\n">>, _Sock) ->
-    set.
+    set;
+parse_status_reply(Status, _Sock) ->
+    Len = byte_size(Status) - 2,
+    <<Val:Len/bytes, "\r\n">> = Status,
+    Val.
 
 %% parse error reply
 parse_error_reply(Bin, _Sock) when is_binary(Bin) ->
     L = byte_size(Bin) - 2,
-    <<Msg:L/binary, "\r\n">> = Bin,
+    <<Msg:L/bytes, "\r\n">> = Bin,
     {error, Msg}.
 
 %% parse integer repley
@@ -134,6 +138,8 @@ recv_line(Sock) ->
     end.
 
 %% binary to integer
+b2n(<<$-, Rest/binary>>) ->
+    -b2n(Rest);
 b2n(Bin) ->
     b2n(Bin, 0).
 

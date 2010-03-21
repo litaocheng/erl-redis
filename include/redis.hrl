@@ -57,10 +57,11 @@
 -type pattern() :: [byte()].
 -type passwd() :: [byte()] | binary().
 -type second() :: non_neg_integer().
+-type timestamp() :: non_neg_integer().
 -type value_type() :: 'none' | 'string' | 'list' | 'set'.
 -type status_code() :: atom().
 -type error_reply() :: any().
-%-type nil() :: 'nil'.
+-type null() :: 'null'.
 -type return() :: 'ok' | 'fail'.
 
 -type inet_host() :: atom() | string() | binary().

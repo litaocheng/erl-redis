@@ -172,7 +172,7 @@ do_set_mode(Mode, Servers, State = #state{type = undefined}) ->
 
 %% get the client
 do_get_client(_Key, #state{type = single, conns = Conns}) ->
-    ?DEBUG2("(single)get client for key: ~p", [_Key]),
+    ?DEBUG2("(single) get client for key: ~p", [_Key]),
     case is_conn_empty(Conns) of
         true ->
             {error, no_server};
@@ -181,7 +181,7 @@ do_get_client(_Key, #state{type = single, conns = Conns}) ->
     end;
 do_get_client(Key, #state{type = dist, conns = Conns, server = DServer}) ->
     {ok, Server} = redis_dist:get_server(Key, DServer),
-    ?DEBUG2("(dist)get client with server:~p for key:~p ", [Server, Key]),
+    ?DEBUG2("(dist) get client with server:~p for key:~p ", [Server, Key]),
     case find_conn(Server, Conns) of
         none ->
             {error, no_server};
