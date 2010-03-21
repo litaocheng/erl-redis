@@ -85,6 +85,8 @@ cmd_string(Config) ->
     null = ?PFun(redis:getset(KeyNow, "yes"))(),
     <<"hello">> = ?PFun(redis:get("key1"))(),
     <<"hello">> = ?PFun(redis:getset("key1", "hi"))(),
+    [<<"hi">>, <<"world">>, null] = ?PFun(redis:multi_get(["key1", <<"key2">>, <<"key_not_exists">>]))(),
+    bool(?PFun(redis:set_not_exists("key4", "val4"))()),
 
     ok.
 

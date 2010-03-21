@@ -259,9 +259,7 @@ flush_all() ->
 -spec set(Key :: key(), Val :: string_value()) ->
     'ok'.
 set(Key, Val) ->
-    L1 = cmd_line(<<"SET">>, Key, ?N2S(iolist_size(Val))),
-    L2 = cmd_line(Val),
-    do_call_key(Key, [L1, L2]).
+    do_set(<<"SET">>, Key, Val).
     
 %% @doc get the value of specified key
 %% O(1)
@@ -279,22 +277,49 @@ getset(Key, Val) ->
     L2 = cmd_line(Val),
     do_call_key(Key, [L1, L2]).
 
+%% @doc get the values of all the specified keys
+%% O(1)
 -spec multi_get(Keys :: [key()]) ->
     [string() | null()].
 multi_get(Keys) ->
-    call(cmd_line([<<"MGET">> | Keys])).
+    lists:append(call_keys(<<"MGET">>, Keys)).
 
+%% @doc set value, if the key already exists no operation is performed
+%% O(1)
 -spec set_not_exists(Key :: key(), Val :: string()) -> 
-    'ok' | 'fail' | error_reply().
+    boolean().
 set_not_exists(Key, Val) ->
-    int_return(
-        call(cmd_line(<<"SETNX">>, Key, Val))).
+    int_bool(
+        do_set(<<"SETNX">>, Key, Val)).
 
--spec multi_set(Keys :: [key()]) ->
-    'ok'.
-multi_set(Keys) ->
-    status_return(
-        call(cmd_line([<<"MSET">> | Keys]))).
+%% @doc set the respective keys to respective values
+%% O(1)
+-spec multi_set(KeyVals :: [{key(), string_value()}]) ->
+    'ok' | {'error', [key()]}.
+multi_set(KeyVals) ->
+    Type = <<"MSET">>,
+    ClientKeys = redis_servers:partition_keys(KeyVals, fun({K, _V}) -> K end),
+
+    Errors = 
+    lists:foldl(
+        fun({Client, Server, KVs}, Acc) ->
+            KVList = lists:append([[K, V] || {K, V} <- KVs]),
+            L = [Type | KVList],
+            case mbulk_cmd(Client, L) of
+                ok ->
+                    Acc;
+                _ ->
+                    {KL, _VL} = lists:unzip(KVs),
+                    KL ++ Acc
+            end
+        end,
+    [], ClientKeys),
+    case Errors of
+        [] ->
+            ok;
+        [_|_] ->
+            {error, Errors}
+    end.
 
 -spec multi_set_not_exists(Keys :: [key()]) ->
     'ok' | 'fail'.
@@ -327,6 +352,12 @@ decr(Key, N) ->
 %% internal API
 %%
 %%------------------------------------------------------------------------------
+
+%% set api
+do_set(Type, Key, Val) ->
+    L1 = cmd_line(Type, Key, ?N2S(iolist_size(Val))),
+    L2 = cmd_line(Val),
+    do_call_key(Key, [L1, L2]).
 
 %% 
 call(_Cmd) ->
@@ -372,6 +403,46 @@ do_call_key(Key, Cmd) ->
 call_keys(Type, Keys) ->
     [call_key(Type, Key) || Key <- Keys].
 
+%% send the mbulk command
+mbulk_cmd(Client, L) ->
+    Count = length(L),
+    Lines = [mbulk_line(E) || E <- L],
+    redis_client:send(Client, Lines).
+
+%% generate the single line
+cmd_line(Type) ->
+    [Type, ?CRLF_BIN].
+
+cmd_line(Type, Arg) ->
+    [Type, ?SEP_BIN, Arg, ?CRLF_BIN].
+
+cmd_line(Type, Arg1, Arg2) ->
+    [Type, ?SEP_BIN, Arg1, ?SEP_BIN, Arg2, ?CRLF_BIN].
+
+cmd_line(Type, Arg1, Arg2, Arg3) ->
+    [Type, ?SEP_BIN, Arg1, ?SEP_BIN, Arg2, ?SEP_BIN, Arg3, ?CRLF_BIN].
+
+%% concat the Parts into a single line
+cmd_line_list(Parts) ->
+    [?SEP_BIN | Line] = 
+    lists:foldr(
+        fun(P, Acc) ->
+            [?SEP_BIN, P | Acc]
+        end,
+    [?CRLF_BIN],
+    Parts),
+    Line.
+
+%% mbulk commands line
+mbulk_line(D) when is_binary(D) ->
+    N = byte_size(D),
+    ["$", ?N2S(N), ?CRLF_BIN,  
+     D, ?CRLF_BIN];
+mbulk_line(D) when is_list(D) ->
+    N = length(D),
+    ["$", ?N2S(N), ?CRLF_BIN,
+    D, ?CRLF_BIN].
+
 %% convert status code to return
 status_return(<<"OK">>) -> ok;
 status_return(S) -> S.
@@ -387,28 +458,7 @@ int_may_bool(0) -> false;
 int_may_bool(1) -> true;
 int_may_bool(V) -> V.
 
-%% generate the single line
-cmd_line(Type) ->
-    [Type, ?CRLF_BIN].
 
-cmd_line(Type, Arg) ->
-    [Type, ?SEP_BIN, Arg, ?CRLF_BIN].
-
-cmd_line(Type, Arg1, Arg2) ->
-    [Type, ?SEP_BIN, Arg1, ?SEP_BIN, Arg2, ?CRLF_BIN].
-
-cmd_line(Type, Arg1, Arg2, Arg3) ->
-    [Type, ?SEP_BIN, Arg1, ?SEP_BIN, Arg2, ?SEP_BIN, Arg3, ?CRLF_BIN].
-
-cmd_line_list(Parts) ->
-    [?SEP_BIN | Line] = 
-    lists:foldr(
-        fun(P, Acc) ->
-            [?SEP_BIN, P | Acc]
-        end,
-    [?CRLF_BIN],
-    Parts),
-    Line.
 
 %% set server mode to application env
 set_mode_env(Mode) ->

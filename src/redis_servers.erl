@@ -90,6 +90,13 @@ get_client(Key) ->
 get_all_clients() ->
     gen_server:call(?SERVER, get_all_clients).
 
+
+%% @doc partition the keys according to the servers mode
+-spec partition_keys(KList :: list(), KFun :: fun()) ->
+    [{pid(), [any()]}].
+partition_keys(KList, KFun) ->
+    ok.
+
 %%
 %% gen_server callbacks
 %%

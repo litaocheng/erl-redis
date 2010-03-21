@@ -113,7 +113,7 @@ parse_mbulk_reply(Bin, Sock) ->
 parse_mbulk_reply1(0, _Sock, Acc) ->
     Acc;
 parse_mbulk_reply1(N, Sock, Acc) ->
-    <<$$, Bin>> = recv_line(Sock),
+    <<$$, Bin/bytes>> = recv_line(Sock),
     Bulk = parse_bulk_reply(Bin, Sock),
     parse_mbulk_reply1(N - 1, Sock, [Bulk | Acc]).
     
