@@ -33,66 +33,53 @@ vsn() ->
 %% @doc return the server info
 -spec servers() -> [single_server()].
 servers() ->
-    redis_servers:server_info().
+    redis_manager:server_info().
 
 %% @doc return the server config type
 -spec server_type() -> server_type().
 server_type() ->
-    redis_servers:server_type().
+    redis_manager:server_type().
 
 %% @doc set single redis server
 -spec single_server(Host :: inet_host(), Port :: inet_port()) ->
-    'ok' | {'error', any()}.
+    'ok' | {'error', 'already_started'}.
 single_server(Host, Port) ->
     single_server(Host, Port, ?DEF_POOL).
 
 %% @doc set single redis server, with the connection pool option
 -spec single_server(Host :: inet_host(), Port :: inet_port(), Pool :: pos_integer()) ->
-    'ok' | {'error', any()}.
+    'ok' | {'error', 'already_started'}.
 single_server(Host, Port, Pool) ->
-    case get_mode_env() of
-        undefined ->
-            Server = {Host, Port, Pool},
-            Mode = {single, Server},
-            % setup the connections in new process
-            ok = redis_conn_sup:setup_connections(Mode),
-            ok = set_mode_env(Mode);
-        _ ->
-            {error, already_set}
+    single_server(Host, Port, Pool, "").
+
+%% @doc set single redis server, with the connection pool and passwd options
+-spec single_server(Host :: inet_host(), Port :: inet_port(), 
+        Pool :: pos_integer(), Passwd :: passwd()) ->
+    'ok' | {'error', 'already_started'}.
+single_server(Host, Port, Pool, Passwd) ->
+    case redis_app:is_manager_started() of
+        false ->
+            redis_app:start_manager({single, {Host, Port, Pool}}, Passwd);
+        true ->
+            {error, already_started}
     end.
 
 %% @doc set the multi servers 
 -spec multi_servers(Servers :: [single_server()]) ->
-    'ok' | {'error', any()}.
+    'ok' | {'error', 'already_started'}.
 multi_servers(Servers) ->
-    Dist = redis_dist:new(Servers),
-    case get_mode_env() of
-        undefined ->
-            Mode = {dist, Dist},
-            % setup the connections in new process
-            ok = redis_conn_sup:setup_connections(Mode),
-            ok = set_mode_env(Mode);
-        _ ->
-            {error, already_set}
+    multi_servers(Servers, "").
+
+%% @doc set the multiple servers, with passwd option
+-spec multi_servers(Servers :: [single_server()], Passwd :: passwd()) ->
+    'ok' | {'error', 'already_started'}.
+multi_servers(Servers, Passwd) ->
+    case redis_app:is_manager_started() of
+        false ->
+            redis_app:start_manager({dist, redis_dist:new(Servers)}, Passwd);
+        true ->
+            {error, already_started}
     end.
-
-%% @doc get server mode from application env
--spec get_mode_env() -> 'undefined' | {'ok', mode_info()}.
-get_mode_env() ->
-    application:get_env(redis, server_mode_info).
-
-%%
-%% Connection handling
-%%
--spec auth(Passwd :: passwd()) ->
-    'ok'.
-auth(Passwd) ->
-    redis_servers:set_passwd(Passwd).
-
--spec auth(Server :: single_server(), Passwd :: passwd()) ->
-    'ok'.
-auth(Server, Passwd) ->
-    redis_servers:set_passwd(Server, Passwd).
 
 %%
 %% generic commands
@@ -298,11 +285,11 @@ set_not_exists(Key, Val) ->
     'ok' | {'error', [key()]}.
 multi_set(KeyVals) ->
     Type = <<"MSET">>,
-    ClientKeys = redis_servers:partition_keys(KeyVals, fun({K, _V}) -> K end),
+    ClientKeys = redis_manager:partition_keys(KeyVals, fun({K, _V}) -> K end),
 
     Errors = 
     lists:foldl(
-        fun({Client, Server, KVs}, Acc) ->
+        fun({Client, KVs}, Acc) ->
             KVList = lists:append([[K, V] || {K, V} <- KVs]),
             L = [Type | KVList],
             case mbulk_cmd(Client, L) of
@@ -365,7 +352,7 @@ call(_Cmd) ->
 
 %% do the call to all the servers
 call_all(Cmd) ->
-    {ok, Clients} = redis_servers:get_all_clients(),
+    {ok, Clients} = redis_manager:get_all_clients(),
     ?DEBUG2("call all send cmd ~p by clients:~p", [Cmd, Clients]),
     {Replies, BadClients} = redis_client:multi_send(Clients, Cmd),
     {[{redis_client:get_server(Pid), R} || {Pid, R} <- Replies],
@@ -374,7 +361,7 @@ call_all(Cmd) ->
 
 %% do the call to any one server
 call_any(Cmd, F) ->
-    {ok, Clients} = redis_servers:get_all_clients(),
+    {ok, Clients} = redis_manager:get_all_clients(),
     ?DEBUG2("call any send cmd ~p by clients:~p", [Cmd, Clients]),
     [V | _] =
     [begin
@@ -396,7 +383,7 @@ call_key(Type, Key, Arg1) ->
 call_key(Type, Key, Arg1, Arg2) ->
     do_call_key(Key, cmd_line(Type, Key, Arg1, Arg2)).
 do_call_key(Key, Cmd) ->
-    {ok, Client} = redis_servers:get_client(Key),
+    {ok, Client} = redis_manager:get_client(Key),
     redis_client:send(Client, Cmd).
 
 %% do the call with keys
@@ -407,7 +394,7 @@ call_keys(Type, Keys) ->
 mbulk_cmd(Client, L) ->
     Count = length(L),
     Lines = [mbulk_line(E) || E <- L],
-    redis_client:send(Client, Lines).
+    redis_client:send(Client, ["*", ?N2S(Count), ?CRLF_BIN, Lines]).
 
 %% generate the single line
 cmd_line(Type) ->
@@ -458,12 +445,6 @@ int_may_bool(0) -> false;
 int_may_bool(1) -> true;
 int_may_bool(V) -> V.
 
-
-
-%% set server mode to application env
-set_mode_env(Mode) ->
-    application:set_env(redis, server_mode_info, Mode).
-
 %% get the application vsn
 %% return 'undefined' | string().
 get_app_vsn() ->
@@ -481,7 +462,7 @@ cmd_line_test_() ->
         ?_assertEqual(<<"EXISTS key1\r\n">>, l2b(cmd_line(<<"EXISTS">>, "key1"))),
         ?_assertEqual(<<"EXISTS key2\r\n">>, l2b(cmd_line("EXISTS", "key2"))),
         ?_assertEqual(<<"type key1 key2\r\n">>, l2b(cmd_line("type", "key1", <<"key2">>))),
-        ?_assertEqual(<<"type key1 key2\r\n">>, l2b(cmd_line(["type", <<"key1">>, "key2"]))),
+        ?_assertEqual(<<"type key1 key2\r\n">>, l2b(cmd_line_list(["type", <<"key1">>, "key2"]))),
 
         ?_assert(true)
     ].

@@ -13,7 +13,7 @@
 -behaviour(gen_server).
 -include("redis.hrl").
 
--export([start_link/3]).
+-export([start_link/4]).
 -export([get_server/1, get_sock/1]).
 -export([send/2, multi_send/2, multi_send/3]).
 
@@ -35,11 +35,12 @@
 
 
 %% @doc start_link the redis_client server
--spec start_link(Server :: single_server(), Index :: pos_integer(), Timeout :: timeout()) -> 
+-spec start_link(Server :: single_server(), Index :: pos_integer(), 
+    Timeout :: timeout(), Passwd :: passwd()) -> 
     {'ok', any()} | 'ignore' | {'error', any()}.
-start_link(Server, Index, Timeout) ->
+start_link(Server, Index, Timeout, Passwd) ->
     ?DEBUG2("start_link redis_client ~p (~p)", [Server, Index]),
-    gen_server:start_link(?MODULE, {Server, Index, Timeout}, []).
+    gen_server:start_link(?MODULE, {Server, Index, Timeout, Passwd}, []).
 
 %% @doc get the server info
 -spec get_server(Client :: pid()) -> server().
@@ -70,13 +71,13 @@ multi_send(Clients, Data, Timeout) when is_list(Clients) ->
 %%
 %% gen_server callbacks
 %%
-init({Server = {Host, Port}, Index, Timeout}) ->
+init({Server = {Host, Port}, Index, Timeout, Passwd}) ->
     ?DEBUG2("init the redis client ~p:~p (~p)", [Host, Port, Index]),
     case gen_tcp:connect(Host, Port, ?TCP_OPTS, Timeout) of
         {ok, Sock} ->
-            case do_auth(Sock, Server) of
+            case do_auth(Sock, Server,Passwd) of
                 ok ->
-                    % notify the client info to the redis_servers
+                    % notify the client info to the redis_manager
                     ok = set_client(Server, Index, self()),
 
                     {ok, #state{server = Server, index = Index, sock = Sock}};
@@ -145,9 +146,8 @@ do_send_recv(Data, Sock, Server) ->
     end.
 
 %% do the auth
-do_auth(Sock, Server) ->
-    Passwd = redis_servers:passwd(Server),
-    ?DEBUG2("auth to server ~p pwd:~p", [Server, Passwd]),
+do_auth(Sock, Server, Passwd) ->
+    ?DEBUG2("auth to server ~p passwd :~p", [Server, Passwd]),
     case Passwd of
         "" ->
             ok;
@@ -155,9 +155,9 @@ do_auth(Sock, Server) ->
             do_send_recv([<<"AUTH ">>, Passwd, ?CRLF], Sock, Server)
     end.
 
-%% notify the redis_servers the client info
+%% notify the redis_manager the client info
 set_client(Server, Index, Pid) ->
-    gen_server:cast(?REDIS_SERVERS, {set_client, Server, Index, Pid}).
+    gen_server:cast(?REDIS_MANAGER, {set_client, Server, Index, Pid}).
 
 
 %%

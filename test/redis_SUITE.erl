@@ -23,8 +23,7 @@ init_per_suite(Config) ->
     crypto:start(),
     code:add_path("../ebin"),
     redis_app:start(),
-    ok = redis:auth("litao"),
-    ok = redis:single_server(localhost, 6379, 1),
+    ok = redis:single_server(localhost, 6379, 1, "litao"),
     Config.
 
 end_per_suite(_Config) ->
