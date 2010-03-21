@@ -54,7 +54,6 @@ get_sock(Client) ->
 %% @doc send the data
 -spec send(Client :: pid(), Data :: iolist()) -> any().
 send(Client, Data) ->
-    ?DEBUG2("send data ~p to server ~p", [Data, get_server(Client)]),
     gen_server:call(Client, {command, Data}).
 
 %% @doc send to multi clients
@@ -92,10 +91,12 @@ init({Server = {Host, Port}, Index, Timeout}) ->
     end.
 
 handle_call({command, Data}, _From, State = #state{sock = Sock, server = Server}) ->
+    ?DEBUG2("redis client send data:~n~p~n\t=> ~p", [Data, Server]),
     case do_send_recv(Data, Sock, Server) of
         {tcp_error, Reason} ->
             {stop, Reason, {tcp_error, Reason}, State};
         Reply ->
+            ?DEBUG2("reply the return ~p~n", [Reply]),
             {reply, Reply, State}
     end;
 handle_call(get_server, _From, State = #state{server = Server}) ->

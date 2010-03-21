@@ -42,8 +42,7 @@
 -define(REDIS_SERVERS, redis_servers).
 -define(CONN_SUP, redis_conn_sup).
 -define(CONN_TIMEOUT, 1000).
--define(RECV_TIMEOUT, 1000).
-
+-define(RECV_TIMEOUT, 1000).  
 %% 
 %% about types and records
 %%
@@ -53,6 +52,7 @@
 
 %% type defines
 -type key() :: binary() | [byte()].
+-type string_value() :: binary() | [byte()].
 -type index() :: non_neg_integer().
 -type pattern() :: [byte()].
 -type passwd() :: [byte()] | binary().

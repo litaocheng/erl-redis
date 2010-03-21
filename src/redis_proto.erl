@@ -95,7 +95,7 @@ parse_intger_reply(Bin, _Sock) ->
     
 %% parse bulk reply
 parse_bulk_reply(<<"-1\r\n">>, _Sock) ->
-    none;
+    null;
 parse_bulk_reply(Bin, Sock) ->
     N = b2n(Bin),
     ok = inet:setopts(Sock, [{packet, raw}]),
@@ -105,7 +105,7 @@ parse_bulk_reply(Bin, Sock) ->
      
 %% parse multi bulk reply
 parse_mbulk_reply(<<"-1\r\n">>, _Sock) ->
-    none;
+    null;
 parse_mbulk_reply(Bin, Sock) ->
     N = b2n(Bin),
     parse_mbulk_reply1(N, Sock, []).
@@ -121,6 +121,7 @@ parse_mbulk_reply1(N, Sock, Acc) ->
 recv_n(Sock, Len) ->
     case gen_tcp:recv(Sock, Len, ?RECV_TIMEOUT) of
         {ok, Bin} ->
+            ?DEBUG2("recv_n :~p", [Bin]),
             Bin;
         {error, Reason} ->
             ?ERROR2("recv n bytes error:~p", [Reason]),
@@ -131,6 +132,7 @@ recv_n(Sock, Len) ->
 recv_line(Sock) ->
     case gen_tcp:recv(Sock, 0, ?RECV_TIMEOUT) of
         {ok, Bin} ->
+            ?DEBUG2("recv_line :~p", [Bin]),
             Bin;
         {error, Reason} ->
             ?ERROR2("recv line error:~p", [Reason]),
@@ -175,8 +177,8 @@ parse_test_() ->
         ?_assertEqual(231, parse_reply(<<":231\r\n">>)),
         ?_assertEqual(987234, parse_reply(<<":987234\r\n">>)),
 
-        ?_assertEqual(none, parse_reply(<<"$-1\r\n">>)),
-        ?_assertEqual(none, parse_reply(<<"*-1\r\n">>)),
+        ?_assertEqual(null, parse_reply(<<"$-1\r\n">>)),
+        ?_assertEqual(null, parse_reply(<<"*-1\r\n">>)),
 
         ?_assert(true)
     ].

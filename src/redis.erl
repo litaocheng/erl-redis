@@ -95,7 +95,7 @@ auth(Server, Passwd) ->
     redis_servers:set_passwd(Server, Passwd).
 
 %%
-%% commands operating on all the kind of values
+%% generic commands
 %%
 
 %% @doc test if the specified key exists
@@ -103,15 +103,15 @@ auth(Server, Passwd) ->
 -spec exists(Key :: key()) -> 
     boolean().
 exists(Key) ->
-    int_return(call_key(<<"EXISTS">>, Key)).
+    int_bool(call_key(<<"EXISTS">>, Key)).
 
 %% @doc remove the specified key, return ture if deleted, 
 %% otherwise return false
 %% O(1)
 -spec delete(Keys :: [key()]) -> 
-    non_neg_integer().
+    boolean().
 delete(Key) ->
-    int_return(call_key(<<"DEL">>, Key)).
+    int_bool(call_key(<<"DEL">>, Key)).
 
 %% @doc remove the specified keys, return the number of
 %% keys removed.
@@ -147,7 +147,7 @@ keys(Pattern) ->
 random_key() ->
     F = 
     fun
-        (nil) ->
+        (null) ->
             false;
         (_) ->
             true
@@ -189,7 +189,7 @@ dbsize() ->
 -spec expire(Key :: key(), Time :: second()) -> 
     boolean().
 expire(Key, Time) ->
-    int_return(
+    int_bool(
         call_key(<<"EXPIRE">>, Key, ?N2S(Time))).
 
 %% @doc set a unix timestamp on the specified key, the Key will
@@ -199,7 +199,7 @@ expire(Key, Time) ->
     boolean().
 expire_at(Key, TimeStamp) ->
     Str = ?N2S(TimeStamp),
-    int_return(
+    int_bool(
         call_key(<<"EXPIREAT">>, Key, Str)).
 
 %% @doc return the remaining time to live in seconds of a key that
@@ -232,7 +232,7 @@ move(Key, DBIndex) ->
 %% @doc delete all the keys of the currently selected DB
 -spec flush_db() -> 'ok' | {'error', [server()]}.
 flush_db() ->
-    {Replies, BadServers} = call_all(cmd_line(<<"FLUSHDB">>)),
+    {_Replies, BadServers} = call_all(cmd_line(<<"FLUSHDB">>)),
     case BadServers of
         [] ->
             ok;
@@ -242,7 +242,7 @@ flush_db() ->
             
 -spec flush_all() -> 'ok' | {'error', [server()]}.
 flush_all() ->
-    {Replies, BadServers} = call_all(cmd_line(<<"FLUSHALL">>)),
+    {_Replies, BadServers} = call_all(cmd_line(<<"FLUSHALL">>)),
     case BadServers of
         [] ->
             ok;
@@ -251,26 +251,36 @@ flush_all() ->
     end.
 
 %%
-%% commands operating on string values
+%% string commands 
 %%
--spec set(Key :: key(), Val :: string()) ->
+
+%% @doc set the string as value of the key
+%% O(1)
+-spec set(Key :: key(), Val :: string_value()) ->
     'ok'.
 set(Key, Val) ->
-    status_return(
-        call(cmd_line(<<"SET">>, Key, Val))).
+    L1 = cmd_line(<<"SET">>, Key, ?N2S(iolist_size(Val))),
+    L2 = cmd_line(Val),
+    do_call_key(Key, [L1, L2]).
     
+%% @doc get the value of specified key
+%% O(1)
 -spec get(Key :: key()) ->
-    nil() | string().
+    null() | binary().
 get(Key) ->
-    call(cmd_line(<<"GET">>, Key)).
+    call_key(<<"GET">>, Key).
 
--spec getset(Key :: key(), Val :: string()) ->
-    nil() | {'ok', string()} | error_reply(). 
+%% @doc atomatic set the value and return the old value
+%% O(1)
+-spec getset(Key :: key(), Val :: string_value()) ->
+    null() | binary() | error_reply(). 
 getset(Key, Val) ->
-    call(cmd_line(<<"GETSET">>, Key, Val)).
+    L1 = cmd_line(<<"GETSET">>, Key, ?N2S(iolist_size(Val))),
+    L2 = cmd_line(Val),
+    do_call_key(Key, [L1, L2]).
 
 -spec multi_get(Keys :: [key()]) ->
-    [string() | nil()].
+    [string() | null()].
 multi_get(Keys) ->
     call(cmd_line([<<"MGET">> | Keys])).
 
@@ -289,7 +299,7 @@ multi_set(Keys) ->
 -spec multi_set_not_exists(Keys :: [key()]) ->
     'ok' | 'fail'.
 multi_set_not_exists(Keys) ->
-    int_return(
+    int_bool(
         call(cmd_line([<<"MSETNX">> | Keys]))).
 
 -spec incr(Key :: key()) -> 
@@ -356,13 +366,11 @@ call_key(Type, Key, Arg1, Arg2) ->
     do_call_key(Key, cmd_line(Type, Key, Arg1, Arg2)).
 do_call_key(Key, Cmd) ->
     {ok, Client} = redis_servers:get_client(Key),
-    ?DEBUG2("call key send cmd ~p  by client:~p", [Cmd, Client]),
     redis_client:send(Client, Cmd).
 
 %% do the call with keys
 call_keys(Type, Keys) ->
     [call_key(Type, Key) || Key <- Keys].
-
 
 %% convert status code to return
 status_return(<<"OK">>) -> ok;
@@ -371,6 +379,9 @@ status_return(S) -> S.
 %% convert integer to return
 int_return(0) -> false;
 int_return(1) -> true.
+
+int_bool(0) -> false;
+int_bool(1) -> true.
 
 int_may_bool(0) -> false;
 int_may_bool(1) -> true;

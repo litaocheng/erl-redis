@@ -5,11 +5,13 @@
 
 -include("ct.hrl").
 -include("redis.hrl").
--define(P(F), 
-    begin
-        ?INFO2("~n~70..=s\ncall\t:\t~s~nresult\t:\t~p~n~70..=s~n", ["=", ??F, F, "="]),
-        %io:format("~n~70..=s\ncall\t:\t~s~nresult\t:\t~p~n~70..=s~n", ["=", ??F, F, "="]),
-        F
+-define(P(F, D), ?INFO2(F, D)).
+    
+-define(PFun(F), 
+    fun() ->
+        V = F,
+        ?INFO2("~n~70..=s\ncall\t:\t~s~nresult\t:\t~p~n~70..-s~n", ["=", ??F, V, "-"]),
+        V
     end).
 
 
@@ -22,7 +24,7 @@ init_per_suite(Config) ->
     code:add_path("../ebin"),
     redis_app:start(),
     ok = redis:auth("litao"),
-    ok = redis:single_server(localhost, 6379, 2),
+    ok = redis:single_server(localhost, 6379, 1),
     Config.
 
 end_per_suite(_Config) ->
@@ -54,27 +56,38 @@ test_dummy(_Config) -> ok.
 
 %% test generic commands
 cmd_generic(Config) ->
-    bool(?P(redis:exists("key1"))),
-    bool(?P(redis:delete("Key2"))),
-    non_neg_int(?P(redis:multi_delete(["Key3", "key4"]))),
-    atom(?P(redis:type("key1"))),
-    {_, _} = ?P(redis:keys("key*")),
-    ?P(redis:random_key()),
-    ?P(redis:dbsize()),
-    bool(?P(redis:expire("key333", 100000))),
-    bool(?P(redis:expire_at("key333", 1289138070))),
-    int(?P(redis:ttl("key333"))),
-    bool(?P(redis:move("key333", 1))),
-    ok = ?P(redis:select(1)),
-    ?P(redis:move("key333", 0)),
-    ok = ?P(redis:select(0)),
+    bool(?PFun(redis:exists("key1"))()),
+    bool(?PFun(redis:delete("Key2"))()),
+    non_neg_int(?PFun(redis:multi_delete(["Key3", "key4"]))()),
+    atom(?PFun(redis:type("key1"))()),
+    {_, _} = ?PFun(redis:keys("key*"))(),
+    ?PFun(redis:random_key())(),
+    ?PFun(redis:dbsize())(),
+    bool(?PFun(redis:expire("key333", 100000))()),
+    bool(?PFun(redis:expire_at("key333", 1289138070))()),
+    int(?PFun(redis:ttl("key333"))()),
+    bool(?PFun(redis:move("key333", 1))()),
+    ok = ?PFun(redis:select(1))(),
+    ?PFun(redis:move("key333", 0))(),
+    ok = ?PFun(redis:select(0))(),
 
-    ok = ?P(redis:flush_db()),
-    ok = ?P(redis:flush_all()),
+    ok = ?PFun(redis:flush_db())(),
+    ok = ?PFun(redis:flush_all())(),
 
     ok.
 
-cmd_string(Config) -> ok.
+cmd_string(Config) -> 
+    ok = ?PFun(redis:set("key1", "hello"))(),
+    ok = ?PFun(redis:set("key2", <<"world">>))(),
+    <<"hello">> = ?PFun(redis:get("key1"))(),
+    KeyNow = lists:concat(["key", now_sec()]),
+    null = ?PFun(redis:get(KeyNow))(),
+    null = ?PFun(redis:getset(KeyNow, "yes"))(),
+    <<"hello">> = ?PFun(redis:get("key1"))(),
+    <<"hello">> = ?PFun(redis:getset("key1", "hi"))(),
+
+    ok.
+
 cmd_list(Config) -> ok.
 cmd_set(Config) -> ok.
 cmd_hash(Config) -> ok.
@@ -87,3 +100,7 @@ non_neg_int(N) when is_integer(N), N >= 0 -> ok.
 int(N) when is_integer(N) -> ok.
 
 atom(A) when is_atom(A) -> ok.
+
+now_sec() ->
+    {A, B, C} = now(),
+    A * 1000000 + B + C div 1000000.
