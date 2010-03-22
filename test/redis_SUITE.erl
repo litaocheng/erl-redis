@@ -10,7 +10,7 @@
 -define(PFun(F), 
     fun() ->
         V = F,
-        ?INFO2("~n~70..=s\ncall\t:\t~s~nresult\t:\t~p~n~70..-s~n", ["=", ??F, V, "-"]),
+        ?INFO2("~n~80..-s\ncall\t:\t~s~nresult\t:\t~p~n~80..=s~n~n", ["-", ??F, V, "="]),
         V
     end).
 
@@ -57,7 +57,7 @@ test_dummy(_Config) -> ok.
 cmd_generic(Config) ->
     bool(?PFun(redis:exists("key1"))()),
     bool(?PFun(redis:delete("Key2"))()),
-    non_neg_int(?PFun(redis:multi_delete(["Key3", "key4"]))()),
+    non_neg_int(?PFun(redis:multi_delete(["Key3", "key4", "key5", "key6"]))()),
     atom(?PFun(redis:type("key1"))()),
     {_, _} = ?PFun(redis:keys("key*"))(),
     ?PFun(redis:random_key())(),
@@ -86,6 +86,7 @@ cmd_string(Config) ->
     <<"hello">> = ?PFun(redis:getset("key1", "hi"))(),
     [<<"hi">>, <<"world">>, null] = ?PFun(redis:multi_get(["key1", <<"key2">>, <<"key_not_exists">>]))(),
     bool(?PFun(redis:set_not_exists("key4", "val4"))()),
+    ?PFun(redis:multi_set([{"key1", "val1"}, {"key2", "val2"}, {"key22", "val22"}]))(),
 
     ok.
 

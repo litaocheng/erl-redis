@@ -97,7 +97,7 @@ handle_call({command, Data}, _From, State = #state{sock = Sock, server = Server}
         {tcp_error, Reason} ->
             {stop, Reason, {tcp_error, Reason}, State};
         Reply ->
-            ?DEBUG2("reply the return ~p~n", [Reply]),
+            ?DEBUG2("reply the return ~p", [Reply]),
             {reply, Reply, State}
     end;
 handle_call(get_server, _From, State = #state{server = Server}) ->

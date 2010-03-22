@@ -104,9 +104,17 @@ delete(Key) ->
 %% keys removed.
 %% O(1)
 -spec multi_delete(Keys :: [key()]) -> 
-    'ok' | non_neg_integer().
+    non_neg_integer().
 multi_delete(Keys) ->
-    lists:sum(call_keys(<<"DEL">>, Keys)).
+    Type = <<"DEL">>,
+    ClientKeys = redis_manager:partition_keys(Keys),
+    ?DEBUG2("client keys is ~p", [ClientKeys]),
+    L =
+    [begin
+        Cmd = cmd_line_list([Type | KLPart]),
+        redis_client:send(Client, Cmd)
+    end || {Client, KLPart} <- ClientKeys],
+    lists:sum(L).
 
 %% @doc return the type of the value stored at key
 %% O(1)
@@ -269,7 +277,25 @@ getset(Key, Val) ->
 -spec multi_get(Keys :: [key()]) ->
     [string() | null()].
 multi_get(Keys) ->
-    lists:append(call_keys(<<"MGET">>, Keys)).
+    Type = <<"MGET">>,
+    Len = length(Keys),
+    KeyIs = lists:zip(lists:seq(1, Len), Keys),
+    KFun = fun({_Index, K}) -> K end,
+    ClientKeys = redis_manager:partition_keys(KeyIs, KFun),
+
+    L =
+    [begin
+        KsPart = [KFun(KI) || KI <- KIsPart],
+        Cmd = cmd_line_list([Type | KsPart]),
+
+        Replies = redis_client:send(Client, Cmd),
+        lists:zip(KIsPart, Replies)
+    end || {Client, KIsPart} <- ClientKeys],
+    AllReplies = lists:append(L),
+    % return the result in the same order with Keys
+    SortedReplies = lists:sort(AllReplies),
+    {KeyIs, Replies} = lists:unzip(SortedReplies),
+    Replies.
 
 %% @doc set value, if the key already exists no operation is performed
 %% O(1)
@@ -385,10 +411,6 @@ call_key(Type, Key, Arg1, Arg2) ->
 do_call_key(Key, Cmd) ->
     {ok, Client} = redis_manager:get_client(Key),
     redis_client:send(Client, Cmd).
-
-%% do the call with keys
-call_keys(Type, Keys) ->
-    [call_key(Type, Key) || Key <- Keys].
 
 %% send the mbulk command
 mbulk_cmd(Client, L) ->

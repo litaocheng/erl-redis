@@ -108,7 +108,7 @@ parse_mbulk_reply(<<"-1\r\n">>, _Sock) ->
     null;
 parse_mbulk_reply(Bin, Sock) ->
     N = b2n(Bin),
-    parse_mbulk_reply1(N, Sock, []).
+    lists:reverse(parse_mbulk_reply1(N, Sock, [])).
 
 parse_mbulk_reply1(0, _Sock, Acc) ->
     Acc;

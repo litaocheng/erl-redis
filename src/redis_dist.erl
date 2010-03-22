@@ -14,7 +14,7 @@
 -include("redis.hrl").
 
 -export([new/1]).
--export([get_server/2]).
+-export([partition_keys/3, get_server/2]).
 -export([to_list/1]).
 
 %% key is : 0..?KEY_RING_SPACE-1
@@ -23,7 +23,7 @@
 
 %% @doc create new dist info
 -spec new(ServerList :: [single_server()]) -> dist_server().
-new(ServerList) ->
+new(ServerList = [_|_]) ->
     % clear the duplicate elements
     Sets =
     lists:foldl(
@@ -50,9 +50,31 @@ new(ServerList) ->
 
     #dist_server{data = SList3}.
 
+
+%% @doc partitions the keys into lists, all elements in each list 
+%% assigned to the same server.
+-spec partition_keys(KList :: list(), KFun :: fun() | 'null', Dist :: dist_server()) ->
+    [{server(), [any()]}].
+partition_keys(KList, KFun, Dist) ->
+    D = 
+    lists:foldl(
+        fun(KE, Acc) ->
+            K =
+            case KFun of
+                null ->
+                    KE;
+                _ ->
+                    KFun(KE)
+            end,
+            {ok, Server} = get_server(K, Dist),
+            dict:append(Server, KE, Acc)
+        end,
+    dict:new(), KList),
+    dict:to_list(D).
+    
 %% @doc get server from dist by the key
 -spec get_server(Key :: key(), Dist :: dist_server()) -> 
-    {'ok', server()} | 'none'.
+    {'ok', server()}.
 get_server(Key, Dist) ->
     catch do_get_server(hash_key(Key), Dist).
 
@@ -100,6 +122,8 @@ dist_test_() ->
     Range = ?KEY_RING_SPACE div 3,
     Data = [{0, Srv1}, {Range, Srv2}, {Range*2, Srv3}],
     Dist = #dist_server{data = Data},
+    KList = [{k1, v1}, {k2, v2}, {k3, v3}],
+    KFun = fun({K, _V}) -> K end,
 
     [
         ?_assertEqual(Dist, new(SL)),
@@ -113,6 +137,7 @@ dist_test_() ->
         ?_assertThrow({ok, Srv3}, do_get_server(Range*2, Dist)),
         ?_assertEqual({ok, Srv1}, do_get_server(Range*2 + 1, Dist)),
         ?_assertEqual({ok, Srv1}, do_get_server(Range*3 - 1, Dist)),
+        ?_assertMatch([{_, [{_K, _V}|_]}|_], partition_keys(KList, KFun, Dist)),
 
         ?_assertEqual(SL, to_list(Dist)),
 

@@ -44,6 +44,7 @@ tags :
 
 clean:
 	(rm -rf ./ebin/*; rm -rf ./edoc/*)
+	(rm -rf ./test/log)
 	(cd src;$(MAKE) clean)
 
 dist: clean

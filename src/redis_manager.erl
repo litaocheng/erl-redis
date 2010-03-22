@@ -16,7 +16,7 @@
 -export([start/2, start_link/2]).
 -export([server_info/0, server_type/0]).
 -export([get_client/1, get_all_clients/0]).
--export([partition_keys/2]).
+-export([partition_keys/1, partition_keys/2]).
 
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
                             terminate/2, code_change/3]).
@@ -70,11 +70,28 @@ get_all_clients() ->
     gen_server:call(?SERVER, get_all_clients).
 
 %% @doc partition the keys according to the servers mode
--spec partition_keys(KList :: list(), KFun :: fun()) ->
+-spec partition_keys(KList :: list()) ->
     [{pid(), [any()]}].
-partition_keys(_KList, _KFun) ->
-    ok.
+partition_keys(KList) ->
+    partition_keys(KList, null).
 
+%% @doc partition the keys according to the servers mode
+-spec partition_keys(KList :: list(), KFun :: fun() | null) ->
+    [{pid(), [any()]}].
+partition_keys(KList, KFun) ->
+    % do all the wrok in the outside, because the logic is a bit
+    % complicated, we want to block the redis_manager process
+    #state{type = Type, conns = Conns, server = SigDist}
+        = gen_server:call(?SERVER, {get, state}),
+    case Type of
+        single ->
+            [{get_conn(Conns), KList}];
+        dist ->
+            ServerKeys = redis_dist:partition_keys(KList, KFun, SigDist),
+            ?DEBUG2("server keys pairs are ~p", [ServerKeys]),
+            [{find_conn(S, Conns), KLpart} || {S, KLpart} <- ServerKeys]
+    end.
+                
 %%
 %% gen_server callbacks
 %%
@@ -108,6 +125,8 @@ init([{Type, SigDist}, Passwd]) ->
             {stop, Reason}
     end.
 
+handle_call({get, state}, _From, State) ->
+    {reply, State, State};
 handle_call(server_info, _From, State) ->
     Reply = do_server_info(State),
     {reply, Reply, State};
