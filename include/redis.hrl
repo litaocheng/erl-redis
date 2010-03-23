@@ -39,7 +39,8 @@
 
 %% the redis supervisor name
 -define(REDIS_SUP, redis_sup).
--define(REDIS_MANAGER, redis_manager).
+-define(REDIS_MANAGER_SINGLE, redis_manager_single).
+-define(REDIS_MANAGER_DIST, redis_manager_dist).
 -define(CONN_SUP, redis_conn_sup).
 -define(CONN_TIMEOUT, 1000).
 -define(RECV_TIMEOUT, 1000).  
@@ -67,6 +68,7 @@
 -type inet_host() :: atom() | string() | binary().
 -type inet_port() :: 0..65535.
 
+-type server_regname() :: atom().
 -type server() :: {inet_host(), inet_port()}.
 -type single_server() :: {inet_host(), inet_port(), pos_integer()}.
 -type dist_server() :: #dist_server{}.

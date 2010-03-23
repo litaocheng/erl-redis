@@ -59,7 +59,7 @@ cmd_generic(Config) ->
     bool(?PFun(redis:delete("Key2"))()),
     non_neg_int(?PFun(redis:multi_delete(["Key3", "key4", "key5", "key6"]))()),
     atom(?PFun(redis:type("key1"))()),
-    {_, _} = ?PFun(redis:keys("key*"))(),
+    ?PFun(redis:keys("key*"))(),
     ?PFun(redis:random_key())(),
     ?PFun(redis:dbsize())(),
     bool(?PFun(redis:expire("key333", 100000))()),

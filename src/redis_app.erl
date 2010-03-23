@@ -16,7 +16,7 @@
 -behaviour(supervisor).
 
 -export([start/0]).
--export([is_manager_started/0, start_manager/2]).
+-export([start_manager/2]).
 -export([start/2, stop/1]).
 -export([init/1]).
 
@@ -25,16 +25,6 @@
 start() ->
     ?DEBUG2("start the ~p application", [?MODULE]),
     application:start(redis).
-
-%% @doc check if the redis_manager is started
--spec is_manager_started() -> boolean().
-is_manager_started() ->
-    case whereis(?REDIS_MANAGER) of
-        undefined ->
-            false;
-        Pid when is_pid(Pid) ->
-            true
-    end.
 
 %% @doc start the redis server manager
 -spec start_manager(Mode :: mode_info(), Passwd :: passwd()) ->

@@ -14,7 +14,7 @@
 -include("redis.hrl").
 
 -export([start_link/4]).
--export([get_server/1, get_sock/1]).
+-export([to_regname/3, get_server/1, get_sock/1]).
 -export([send/2, multi_send/2, multi_send/3]).
 
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -33,14 +33,20 @@
             {recbuf, 102400},
             {send_timeout, 5000}, {send_timeout_close, true}]).
 
-
 %% @doc start_link the redis_client server
--spec start_link(Server :: single_server(), Index :: pos_integer(), 
+-spec start_link(Server :: server(), Index :: pos_integer(), 
     Timeout :: timeout(), Passwd :: passwd()) -> 
     {'ok', any()} | 'ignore' | {'error', any()}.
-start_link(Server, Index, Timeout, Passwd) ->
-    ?DEBUG2("start_link redis_client ~p (~p)", [Server, Index]),
-    gen_server:start_link(?MODULE, {Server, Index, Timeout, Passwd}, []).
+start_link({Host, Port} = Server, Index, Timeout, Passwd) ->
+    Name = to_regname(Host, Port, Index, true),
+    ?DEBUG2("start_link redis_client ~p", [Name]),
+    gen_server:start_link({local, Name}, ?MODULE, {Server, Index, Timeout, Passwd}, []).
+
+%% @doc convert server struct to registered process name
+-spec to_regname(Host :: inet_host(), Port :: inet_port(), Index :: index()) ->
+    atom().
+to_regname(Host, Port, Index) ->
+    to_regname(Host, Port, Index, false).
 
 %% @doc get the server info
 -spec get_server(Client :: pid()) -> server().
@@ -77,9 +83,6 @@ init({Server = {Host, Port}, Index, Timeout, Passwd}) ->
         {ok, Sock} ->
             case do_auth(Sock, Server,Passwd) of
                 ok ->
-                    % notify the client info to the redis_manager
-                    ok = set_client(Server, Index, self()),
-
                     {ok, #state{server = Server, index = Index, sock = Sock}};
                 {tcp_error, Reason} ->
                     {stop, Reason};
@@ -128,6 +131,16 @@ code_change(_Old, State, _Extra) ->
 %%
 %%-----------------------------------------------------------------------------
 
+%% convert server info to process registered name
+to_regname(Host, Port, Index, First) ->
+    L = lists:concat(["redis_client_", Host, "_", Port, "_", Index]),
+    case First of
+        true ->
+            list_to_atom(L);
+        false ->
+            list_to_existing_atom(L)
+    end.
+
 %% do sync send and recv 
 do_send_recv(Data, Sock, Server) ->
     case gen_tcp:send(Sock, Data) of
@@ -154,10 +167,6 @@ do_auth(Sock, Server, Passwd) ->
         _ ->
             do_send_recv([<<"AUTH ">>, Passwd, ?CRLF], Sock, Server)
     end.
-
-%% notify the redis_manager the client info
-set_client(Server, Index, Pid) ->
-    gen_server:cast(?REDIS_MANAGER, {set_client, Server, Index, Pid}).
 
 
 %%
@@ -207,10 +216,10 @@ do_multi_send(Clients, Req, Timeout) ->
 %% send the requests to all the process
 do_send_reqs(Clients, Tag, Req) ->
     do_send_reqs(Clients, Tag, Req, []).
-do_send_reqs([Pid|Tail], Tag, Req, Monitors) when is_pid(Pid) ->
-    Monitor = erlang:monitor(process,Pid),
-    catch Pid ! {'$gen_call', {self(), Tag}, Req},
-    do_send_reqs(Tail, Tag, Req, [{Pid, Monitor} | Monitors]);
+do_send_reqs([P|Tail], Tag, Req, Monitors) ->
+    Monitor = erlang:monitor(process,P),
+    catch P ! {'$gen_call', {self(), Tag}, Req},
+    do_send_reqs(Tail, Tag, Req, [{P, Monitor} | Monitors]);
 do_send_reqs([], _Tag, _Req, Monitors) -> 
     Monitors.
 

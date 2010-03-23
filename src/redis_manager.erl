@@ -14,8 +14,9 @@
 -include("redis.hrl").
 
 -export([start/2, start_link/2]).
--export([server_info/0, server_type/0]).
--export([get_client/1, get_all_clients/0]).
+-export([is_started/0, select_db/1]).
+-export([server_list/0, server_type/0]).
+-export([get_client_smode/1, get_client/1, get_clients_one/0, get_clients_all/0]).
 -export([partition_keys/1, partition_keys/2]).
 
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -23,33 +24,56 @@
 
 -record(state, {
         type = undefined :: server_type(),  % the servers type
-        conns = [],                         % the connections
         server = null :: server_info(),     % store the single or dist server
+        dbindex = 0,                        % the db index
 
         dummy
     }).
 
--define(SERVER, ?REDIS_MANAGER).
+-define(SERVER, manager_pid()).
 
 %% @doc start the redis_sysdata server
 -spec start(Mode :: mode_info(), Passwd :: passwd()) ->
     {'ok', any()} | 'ignore' | {'error', any()}.
-start(Mode, Passwd) ->
-    ?DEBUG2("start ~p mode: ~p passwd :~p", [?SERVER, Mode, Passwd]),
-    gen_server:start({local, ?SERVER}, ?MODULE, [Mode, Passwd], []).
+start({T, _} = Mode, Passwd) ->
+    Name = manager_name(T),
+    ?DEBUG2("start ~p mode: ~p passwd :~p", [Name, Mode, Passwd]),
+    gen_server:start({local, Name}, ?MODULE, [Mode, Passwd], []).
 
 %% @doc start_link the redis_sysdata server
 -spec start_link(Mode :: mode_info(), Passwd :: passwd()) ->
     {'ok', any()} | 'ignore' | {'error', any()}.
-start_link(Mode, Passwd) ->
-    ?DEBUG2("start_link ~p mode: ~p passwd :~p", [?SERVER, Mode, Passwd]),
-    gen_server:start_link({local, ?SERVER}, ?MODULE, [Mode, Passwd], []).
+start_link({T, _} = Mode, Passwd) ->
+    Name = manager_name(T),
+    ?DEBUG2("start_link ~p mode: ~p passwd :~p", [Name, Mode, Passwd]),
+    gen_server:start_link({local, Name}, ?MODULE, [Mode, Passwd], []).
+
+%% @doc check if the redis_manager is started
+-spec is_started() -> boolean().
+is_started() ->
+    case get_mode() of
+        undefined ->
+            false;
+        _ ->
+            true
+    end.
+
+%% @doc select db
+select_db(_Index) ->
+    ok.
 
 %% @doc get the server list info
--spec server_info() ->
+-spec server_list() ->
     [single_server()].
-server_info() ->
-    gen_server:call(?SERVER, server_info).
+server_list() ->
+    case catch get_server(all) of
+        {ok, Servers} when is_list(Servers) ->
+            Servers;
+        {ok, Server} ->
+            [Server];
+        {'EXIT', _} ->
+            []
+    end.
 
 %% @doc get th server config type
 -spec server_type() ->
@@ -57,17 +81,39 @@ server_info() ->
 server_type() ->
     gen_server:call(?SERVER, server_type).
 
-%% @doc get the client
--spec get_client(Key :: key()) ->
-    {'ok', pid()} | {'error', any()}.
-get_client(Key) ->
-    gen_server:call(?SERVER, {get_client, Key}).
+%% @doc get a client, the manager must be in single mode
+-spec get_client_smode(Key :: key()) -> 
+    {'ok', server_regname()}.
+get_client_smode(Key) ->
+    case get_mode() of
+        Mode when Mode =/= single ->
+            throw({error, redis_mode});
+        _ ->
+            get_client(Key)
+    end.
 
-%% @doc get all the clients
--spec get_all_clients() ->
-    {ok, [pid()]}.
-get_all_clients() ->
-    gen_server:call(?SERVER, get_all_clients).
+%% @doc get the client according to the Key
+-spec get_client(Key :: key()) ->
+    {'ok', atom()} | {'error', any()}.
+get_client(Key) ->
+    {ok, {Host, Port, PoolSize}} = get_server(Key),
+    {ok, redis_client:to_regname(Host, Port, random:uniform(PoolSize))}.
+
+%% @doc pick up one connection from the connection pool for each server
+-spec get_clients_one() -> [server_regname()].
+get_clients_one() ->
+    {ok, Servers} = get_server(all),
+    {ok, 
+    [redis_client:to_regname(Host, Port, random:uniform(PoolSize))
+        || {Host, Port, PoolSize} <- Servers]}.
+
+%% @doc get all connections in the conncetion pool for all servers
+-spec get_clients_all() -> [server_regname()].
+get_clients_all() ->
+    {ok, Servers} = get_server(all),
+    {ok, 
+    [[redis_client:to_regname(Host, Port, I) || I <- lists:seq(1, PoolSize)]
+        || {Host, Port, PoolSize} <- Servers]}.
 
 %% @doc partition the keys according to the servers mode
 -spec partition_keys(KList :: list()) ->
@@ -81,16 +127,18 @@ partition_keys(KList) ->
 partition_keys(KList, KFun) ->
     % do all the wrok in the outside, because the logic is a bit
     % complicated, we want to block the redis_manager process
-    #state{type = Type, conns = Conns, server = SigDist}
+    #state{type = Type, server = SigDist}
         = gen_server:call(?SERVER, {get, state}),
     case Type of
         single ->
-            [{get_conn(Conns), KList}];
+            [{random_client(SigDist), KList}];
         dist ->
             ServerKeys = redis_dist:partition_keys(KList, KFun, SigDist),
             ?DEBUG2("server keys pairs are ~p", [ServerKeys]),
-            [{find_conn(S, Conns), KLpart} || {S, KLpart} <- ServerKeys]
+            [{random_client(Server), KLpart} 
+                || {Server, KLpart} <- ServerKeys]
     end.
+
                 
 %%
 %% gen_server callbacks
@@ -127,28 +175,14 @@ init([{Type, SigDist}, Passwd]) ->
 
 handle_call({get, state}, _From, State) ->
     {reply, State, State};
-handle_call(server_info, _From, State) ->
-    Reply = do_server_info(State),
-    {reply, Reply, State};
 handle_call(server_type, _From, State = #state{type = Type}) ->
     {reply, Type, State};
-handle_call({set_mode, {Mode, Servers}}, _From, State) ->
-    {Reply, State2} = do_set_mode(Mode, Servers, State),
-    {reply, Reply, State2};
-handle_call({get_client, Key}, _From, State) ->
-    Reply = do_get_client(Key, State),
-    {reply, Reply, State};
-handle_call(get_all_clients, _From, State) ->
-    Reply = do_get_all_clients(State),
+handle_call({get_server, Type}, _From, State) ->
+    Reply = do_get_server(Type, State),
     {reply, Reply, State};
 handle_call(_Msg, _From, State) ->
     {noreply, State}.
 
-handle_cast({set_client, Server, Index, Pid}, State) ->
-    % caller is the function set_client in redis_client
-    State2 = do_set_client(Server, Index, Pid, State),
-    ?DEBUG2("conns is ~p", [State2#state.conns]),
-    {noreply, State2};
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
@@ -167,95 +201,58 @@ code_change(_Old, State, _Extra) ->
 %%
 %%-----------------------------------------------------------------------------
 
-%% set the single mode
-do_set_mode(Mode, Servers, State = #state{type = undefined}) ->
-    {ok, State#state{type = Mode, server = Servers}}.
+%% return the manager registered name
+manager_name(single) ->
+    ?REDIS_MANAGER_SINGLE;
+manager_name(dist) ->
+    ?REDIS_MANAGER_DIST.
 
-%% get the client
-do_get_client(_Key, #state{type = single, conns = Conns}) ->
-    ?DEBUG2("(single) get client for key: ~p", [_Key]),
-    case is_conn_empty(Conns) of
-        true ->
-            {error, no_server};
-        false ->
-            {ok, get_conn(Conns)}
-    end;
-do_get_client(Key, #state{type = dist, conns = Conns, server = DServer}) ->
-    {ok, Server} = redis_dist:get_server(Key, DServer),
-    ?DEBUG2("(dist) get client with server:~p for key:~p ", [Server, Key]),
-    case find_conn(Server, Conns) of
-        none ->
-            {error, no_server};
-        {ok, Conn} ->
-            {ok, Conn}
-    end.
-
-%% get all the clients
-do_get_all_clients(#state{type = single, conns = Conns}) ->
-    {ok, [random_conn(Pids) || {_Server, Pids} <- Conns]}.
-
-%% set the client info
-do_set_client(Server, Index, Pid, State = #state{type = single, conns = Conns}) ->
-    ?DEBUG2("(single)set the redis client info, server:~p (~p) pid:~p", [Server, Index, Pid]),
-    State#state{conns = set_conn(Server, Index, Pid, Conns)};
-do_set_client(Server, Index, Pid, State = #state{type = dist, conns = Conns}) ->
-    ?DEBUG2("(dist)set the redis client info, server:~p (~p) pid:~p", [Server, Index, Pid]),
-    State#state{conns = set_conn(Server, Index, Pid, Conns)}.
-
-%% get server info
-do_server_info(#state{type = Type, server = S}) ->
-    case Type of
-        single ->
-            S;
-        dist ->
-            motown_dist:to_list(S);
+%% return the manager pid
+manager_pid() ->
+    case whereis(?REDIS_MANAGER_SINGLE) of
         undefined ->
-            []
+            whereis(?REDIS_MANAGER_DIST);
+        Pid ->
+            Pid
     end.
 
-%%
-%% about conns
-%% conns is an list, the element struct is 
-%% {Server, [{Index, Pid}]}
-%% Server is {Host, Port}
-%% Index is the pool index
-%% Pid is the redis_client pid
-%%
+%% random get a client process
+random_client({Host, Port, PoolSize}) ->
+    redis_client:to_regname(Host, Port, random:uniform(PoolSize)).
 
-%% is the conns is empty?
-is_conn_empty(Conns) ->
-    Conns =:= [].
-
-%% get one connection from the conns
-get_conn([]) -> none;
-get_conn([{_Server, Pids} | _]) ->
-    random_conn(Pids).
-
-%% random get one connection
-random_conn([{_Index, Pid}]) -> % onle one
-    Pid;
-random_conn(Pids) ->
-    {_Index, Pid} = lists:nth(random:uniform(length(Pids)), Pids),
-    Pid.
-    
-%% find connection from the conns 
-find_conn(Server, Conns) ->
-    case lists:keyfind(Server, 1, Conns) of
-        false ->
-            none;
-        {Server, Pids} ->
-            random_conn(Pids)
+%% get server mode
+get_mode() ->
+    case whereis(?REDIS_MANAGER_SINGLE) of
+        undefined ->
+            case whereis(?REDIS_MANAGER_DIST) of
+                undefined ->
+                    undefined;
+                Pid when is_pid(Pid) ->
+                    dist
+            end;
+        Pid when is_pid(Pid) ->
+            single 
     end.
 
-%% set connection to the conns
-set_conn(Server, Index, Pid, Conns) ->
-    case lists:keyfind(Server, 1, Conns) of
-        false -> % not found
-            [{Server, [{Index, Pid}]} | Conns];
-        {Server, Pids} ->
-            Pids2 = lists:keystore(Index, 1, Pids, {Index, Pid}),
-            lists:keyreplace(Server, 1, Conns, {Server, Pids2})
-    end.
+%% get server info from manager
+get_server(Type) ->
+    gen_server:call(?SERVER, {get_server, Type}).
+
+%% do get server
+do_get_server(all, #state{type = single, server = SigDist}) ->
+    {ok, [SigDist]};
+do_get_server(_Key, #state{type = single, server = SigDist}) ->
+    {ok, SigDist};
+do_get_server(all, #state{type = dist, server = SigDist}) ->
+    {ok, redis_dist:to_list(SigDist)};
+do_get_server(Key, #state{type = dist, server = SigDist}) ->
+    redis_dist:get_server(Key, SigDist).
+
+%% return random item
+%random([H]) -> % only one
+%    H;
+%andom([_|_] = L) ->
+%   lists:nth(random:uniform(length(L)), L).
 
 %% setup connections
 do_setup_connections(Type, SigDist, Passwd) ->
