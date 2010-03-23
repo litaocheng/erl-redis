@@ -144,7 +144,7 @@ random_key() ->
 %% MUST single mode
 %% O(1)
 -spec rename(OldKey :: key(), NewKey :: key()) -> 
-    'ok'.
+    'ok' | error_reply().
 rename(OldKey, NewKey) ->
     {ok, Client} = redis_manager:get_client_smode(OldKey),
     call(Client, line(<<"RENAME">>, OldKey, NewKey)).
@@ -153,11 +153,11 @@ rename(OldKey, NewKey) ->
 %% MUST single mode
 %% O(1)
 -spec rename_not_exists(OldKey :: key(), NewKey :: key()) -> 
-    boolean().
+    boolean() | error_reply().
 rename_not_exists(OldKey, NewKey) ->
     {ok, Client} = redis_manager:get_client_smode(OldKey),
     R = call(Client, line(<<"RENAMENX">>, OldKey, NewKey)),
-    int_bool(R).
+    int_may_bool(R).
 
 %% @doc return the nubmer of keys in all the currently selected database
 %% O(1)
@@ -294,40 +294,50 @@ set_not_exists(Key, Val) ->
     int_bool(R).
 
 %% @doc set the respective keys to respective values
+%% NOTE: MUST single mode
 %% O(1)
-%%??
 -spec multi_set(KeyVals :: [{key(), string_value()}]) ->
-    'ok' | {'error', [key()]} | {'error', 'not_supported'}.
+    'ok'.
 multi_set(KeyVals) ->
-    Type = <<"MSET">>,
-    ok.
-    %Client = ?SIN_CLT,
-    %L = [Type | lists:append([[K, V] || {K, V} <- KeyVals])],
-    %call(Client, mbulk(L)).
+    {ok, Client} = redis_manager:get_client_smode(),
+    L = [<<"MSET">> | lists:append([[K, V] || {K, V} <- KeyVals])],
+    call(Client, mbulk(L)).
 
-%%??
--spec multi_set_not_exists(Keys :: [key()]) ->
-    'ok' | 'fail'.
-multi_set_not_exists(Keys) ->
-    ok.
-    %int_bool(
-    %    call(line([<<"MSETNX">> | Keys]))).
+%% @doc set the respective keys to respective values, either all the
+%% key-value paires or not none at all are set.
+%% NOTE: MUST single mode
+%% O(1)
+-spec multi_set_not_exists(KeyVals :: [{key(), string_value()}]) ->
+    boolean().
+multi_set_not_exists(KeyVals) ->
+    {ok, Client} = redis_manager:get_client_smode(),
+    L = [<<"MSETNX">> | lists:append([[K, V] || {K, V} <- KeyVals])],
+    R = call(Client, mbulk(L)),
+    int_bool(R).
 
+%% @doc increase the integer value of key
+%% O(1)
 -spec incr(Key :: key()) -> 
     integer().
 incr(Key) ->
     call_key(Key, line(<<"INCR">>, Key)).
 
+%% @doc increase the integer value of key by integer
+%% O(1)
 -spec incr(Key :: key(), N :: integer()) -> 
     integer().
 incr(Key, N) ->
     call_key(Key, line(<<"INCRBY">>, Key, ?N2S(N))).
 
+%% @doc decrease the integer value of key
+%% O(1)
 -spec decr(Key :: key()) -> 
     integer().
 decr(Key) ->
     call_key(Key, line(<<"DECR">>, Key)).
 
+%% @doc decrease the integer value of key by integer
+%% O(1)
 -spec decr(Key :: key(), N :: integer()) -> 
     integer().
 decr(Key, N) ->
@@ -338,26 +348,6 @@ decr(Key, N) ->
 %% internal API
 %%
 %%------------------------------------------------------------------------------
-
-%% send the mbulk command
-mbulk_cmd(Client, L) ->
-    Count = length(L),
-    Lines = [mbulk_line(E) || E <- L],
-    redis_client:send(Client, ["*", ?N2S(Count), ?CRLF_BIN, Lines]).
-
-%% mbulk commands line
-mbulk_line(D) when is_binary(D) ->
-    N = byte_size(D),
-    ["$", ?N2S(N), ?CRLF_BIN,  
-     D, ?CRLF_BIN];
-mbulk_line(D) when is_list(D) ->
-    N = length(D),
-    ["$", ?N2S(N), ?CRLF_BIN,
-    D, ?CRLF_BIN].
-
-%%------------------------------------------------------
-%% news
-%%------------------------------------------------------
 
 %% generate the line 
 line(Type) ->
@@ -386,9 +376,8 @@ bulk(Type, Arg1, Arg2) ->
 %% generate the mbulk command
 mbulk(L) ->
     N = length(L),
-    L1 = line("*", ?N2S(N)),
     Lines = [mbulk1(E) || E <- L],
-    [L1 | Lines].
+    ["*", ?N2S(N), ?CRLF | Lines].
 mbulk1(B) when is_binary(B) ->
     N = byte_size(B),
     ["$", ?N2S(N), ?CRLF, B, ?CRLF];

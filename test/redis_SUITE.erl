@@ -59,8 +59,10 @@ cmd_generic(Config) ->
     bool(?PFun(redis:delete("Key2"))()),
     non_neg_int(?PFun(redis:multi_delete(["Key3", "key4", "key5", "key6"]))()),
     atom(?PFun(redis:type("key1"))()),
-    ?PFun(redis:keys("key*"))(),
+    {_, _} = ?PFun(redis:keys("key*"))(),
     ?PFun(redis:random_key())(),
+    ?PFun(redis:rename("key1", "key2"))(),
+    ?PFun(redis:rename_not_exists("key1", "key2"))(),
     ?PFun(redis:dbsize())(),
     bool(?PFun(redis:expire("key333", 100000))()),
     bool(?PFun(redis:expire_at("key333", 1289138070))()),
@@ -87,7 +89,12 @@ cmd_string(Config) ->
     [<<"hi">>, <<"world">>, null] = ?PFun(redis:multi_get(["key1", <<"key2">>, <<"key_not_exists">>]))(),
     bool(?PFun(redis:set_not_exists("key4", "val4"))()),
     ?PFun(redis:multi_set([{"key1", "val1"}, {"key2", "val2"}, {"key22", "val22"}]))(),
-
+    ok = ?PFun(redis:set("key_num_1", "100"))(),
+    101 = ?PFun(redis:incr("key_num_1"))(),
+    106 = ?PFun(redis:incr("key_num_1", 5))(),
+    105 = ?PFun(redis:decr("key_num_1"))(),
+    90 = ?PFun(redis:decr("key_num_1", 15))(),
+    ?PFun(redis:decr("key_num_1", 100))(),
     ok.
 
 cmd_list(Config) -> ok.

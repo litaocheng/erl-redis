@@ -16,7 +16,8 @@
 -export([start/2, start_link/2]).
 -export([is_started/0, select_db/1]).
 -export([server_list/0, server_type/0]).
--export([get_client_smode/1, get_client/1, get_clients_one/0, get_clients_all/0]).
+-export([get_client_smode/0, get_client_smode/1, 
+            get_client/1, get_clients_one/0, get_clients_all/0]).
 -export([partition_keys/1, partition_keys/2]).
 
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -80,6 +81,18 @@ server_list() ->
     server_type().
 server_type() ->
     gen_server:call(?SERVER, server_type).
+
+%% @doc get a client, the manager must be in single mode
+-spec get_client_smode() -> 
+    {'ok', server_regname()}.
+get_client_smode() ->
+    case get_mode() of
+        Mode when Mode =/= single ->
+            throw({error, redis_mode});
+        _ ->
+            {ok, [Server]} = get_server(all),
+            {ok, random_client(Server)}
+    end.
 
 %% @doc get a client, the manager must be in single mode
 -spec get_client_smode(Key :: key()) -> 
