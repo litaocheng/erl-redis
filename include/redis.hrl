@@ -53,17 +53,18 @@
 
 %% type defines
 -type key() :: binary() | [byte()].
--type string_value() :: binary() | [byte()].
--type index() :: non_neg_integer().
+-type str() :: binary() | [byte()].
+-type null() :: 'null'.
+-type value() :: null() | str().
+-type length() :: non_neg_integer().
+-type index() :: integer().
 -type pattern() :: [byte()].
 -type passwd() :: [byte()] | binary().
 -type second() :: non_neg_integer().
 -type timestamp() :: non_neg_integer().
--type value_type() :: 'none' | 'string' | 'list' | 'set'.
+-type val_type() :: 'none' | 'string' | 'list' | 'set'.
 -type status_code() :: atom().
--type error_reply() :: any().
--type null() :: 'null'.
--type return() :: 'ok' | 'fail'.
+-type error() :: {'error', any()}.
 
 -type inet_host() :: atom() | string() | binary().
 -type inet_port() :: 0..65535.
@@ -76,5 +77,9 @@
 -type server_type() :: 'undefined' | 'single' | 'dist'.
 -type mode_info() :: {'single', single_server()} | {'dist', dist_server()}.
 
+-type string_value() :: binary() | [byte()].
+-type value_type() :: 'none' | 'string' | 'list' | 'set'.
+-type error_reply() :: any().
+-type return() :: 'ok' | 'fail'.
 
 -endif. % REDIS_HRL

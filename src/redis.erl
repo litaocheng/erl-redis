@@ -14,6 +14,8 @@
 
 -export([i/0]).
 -compile([export_all]).
+-compile(inline).
+-compile({inline_size, 30}).
 
 %% connection pool size
 -define(DEF_POOL, 2).
@@ -71,9 +73,9 @@ multi_servers(Servers) ->
 multi_servers(Servers, Passwd) ->
     redis_app:start_manager({dist, redis_dist:new(Servers)}, Passwd).
 
-%%
+%%------------------------------------------------------------------------------
 %% generic commands
-%%
+%%------------------------------------------------------------------------------
 
 %% @doc test if the specified key exists
 %% O(1)
@@ -236,9 +238,9 @@ flush_all() ->
             {error, BadServers}
     end.
 
-%%
+%%------------------------------------------------------------------------------
 %% string commands 
-%%
+%%------------------------------------------------------------------------------
 
 %% @doc set the string as value of the key
 %% O(1)
@@ -346,6 +348,105 @@ decr(Key, N) ->
     call_key(Key, line(<<"DECRBY">>, Key, ?N2S(N))).
 
 %%------------------------------------------------------------------------------
+%% list commands
+%%------------------------------------------------------------------------------
+
+%% @doc add the string Val to the tail of the list stored at Key
+%% O(1)
+-spec list_push_tail(Key :: key(), Val :: str()) ->
+    'ok' | error().
+list_push_tail(Key, Val) ->
+    call_key(Key, bulk(<<"RPUSH">>, Key, Val)).
+
+%% @doc add the string Val to the head of the list stored at Key
+%% O(1)
+-spec list_push_head(Key :: key(), Val :: str()) ->
+    'ok' | error().
+list_push_head(Key, Val) ->
+    call_key(Key, bulk(<<"LPUSH">>, Key, Val)).
+
+%% @doc return the length of the list
+%% O(1)
+-spec list_len(Key :: key()) ->
+    length() | error().
+list_len(Key) ->
+    call_key(Key, line(<<"LLEN">>, Key)).
+
+%% @doc return the specified elements of the list, Start, End are zero-based
+%% O(n)
+-spec list_range(Key :: key(), Start :: index(), End :: index()) ->
+    [value()].
+list_range(Key, Start, End) ->
+    call_key(Key, line(<<"LRANGE">>, Key, ?N2S(Start), ?N2S(End))).
+
+%% @doc trim an existing list, it will contains the elements specified by 
+%% Start End
+%% O(n)
+-spec list_trim(Key :: key(), Start :: index(), End :: index()) ->
+    'ok' | error().
+list_trim(Key, Start, End) ->
+    call_key(Key, line(<<"LTRIM">>, Key, ?N2S(Start), ?N2S(End))).
+
+%% @doc return the element at Idx in the list(zero-based)
+%% O(n)
+-spec list_index(Key :: key(), Idx :: index()) ->
+    value().
+list_index(Key, Idx) ->
+    call_key(Key, line(<<"LINDEX">>, Key, ?N2S(Idx))).
+
+%% @doc set the list element at Idx with the new value Val
+%% O(n)
+-spec list_set(Key :: key(), Idx :: index(), Val :: str()) ->
+    'ok' | error().
+list_set(Key, Idx, Val) ->
+    call_key(Key, bulk(<<"LSET">>, Key, ?N2S(Idx), Val)).
+
+%% @doc remove all the elements in the list whose value are Val
+%% O(n)
+-spec list_rm(Key :: key(), Val :: str()) ->
+    integer().
+list_rm(Key, Val) ->
+    call_key(Key, bulk(<<"LREM">>, Key, "0", Val)).
+
+%% @doc remove the first N occurrences of the value from head to
+%% tail in the list
+%% O(n)
+-spec list_rm_head(Key :: key(), N :: pos_integer(), Val :: str()) ->
+    integer().
+list_rm_head(Key, N, Val) ->
+    call_key(Key, bulk(<<"LREM">>, Key, ?N2S(N), Val)).
+
+%% @doc remove the first N occurrences of the value from tail 
+%% head in the list
+%% O(n)
+-spec list_rm_tail(Key :: key(), N :: pos_integer(), Val :: str()) ->
+    integer().
+list_rm_tail(Key, N, Val) ->
+    call_key(Key, bulk(<<"LREM">>, Key, ?N2S(-N), Val)).
+
+%% @doc atomically return and remove the first element of the list
+%% O(1)
+-spec list_pop_head(Key :: key()) ->
+    value().
+list_pop_head(Key) ->
+    call_key(Key, line(<<"LPOP">>, Key)).
+
+%% @doc atomically return and remove the last element of the list
+%% O(1)
+-spec list_pop_tail(Key :: key()) ->
+    value().
+list_pop_tail(Key) ->
+    call_key(Key, line(<<"RPOP">>, Key)).
+
+%% @doc atomically remove the last element of the SrcKey list and push
+%% the element into the DstKey list
+%% NOTE: MUST single mode
+%% O(1)
+list_tail_to_head(SrcKey, DstKey) ->
+    {ok, Client} = redis_manager:get_client_smode(SrcKey),
+    call(Client, line(<<"RPOPLPUSH">>, SrcKey, DstKey)).
+
+%%------------------------------------------------------------------------------
 %%
 %% internal API
 %%
@@ -373,6 +474,10 @@ line_list(Parts) ->
 bulk(Type, Arg1, Arg2) ->
     L1 = line(Type, Arg1, ?N2S(iolist_size(Arg2))),
     L2 = line(Arg2),
+    [L1, L2].
+bulk(Type, Arg1, Arg2, Arg3) ->
+    L1 = line(Type, Arg1, Arg2, ?N2S(iolist_size(Arg3))),
+    L2 = line(Arg3),
     [L1, L2].
 
 %% generate the mbulk command
