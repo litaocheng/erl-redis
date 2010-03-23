@@ -141,7 +141,7 @@ random_key() ->
     catch call_any(line(<<"RANDOMKEY">>), F).
 
 %% @doc atmoically renames key OldKey to NewKey
-%% MUST single mode
+%% NOTE: MUST single mode
 %% O(1)
 -spec rename(OldKey :: key(), NewKey :: key()) -> 
     'ok' | error_reply().
@@ -150,7 +150,7 @@ rename(OldKey, NewKey) ->
     call(Client, line(<<"RENAME">>, OldKey, NewKey)).
 
 %% @doc  rename oldkey into newkey  but fails if the destination key newkey already exists. 
-%% MUST single mode
+%% NOTE: MUST single mode
 %% O(1)
 -spec rename_not_exists(OldKey :: key(), NewKey :: key()) -> 
     boolean() | error_reply().
@@ -207,6 +207,7 @@ select(Index) ->
 
 %% @doc move the specified key  from the currently selected DB to the specified
 %% destination DB
+%% NOTE: MUST single mode
 -spec move(Key :: key(), DBIndex :: index()) ->
     boolean() | error_reply().
 move(Key, DBIndex) ->
@@ -270,6 +271,7 @@ multi_get(Keys) ->
     KeyIs = lists:zip(lists:seq(1, Len), Keys),
     KFun = fun({_Index, K}) -> K end,
     ClientKeys = redis_manager:partition_keys(KeyIs, KFun),
+    ?DEBUG2("get client keys partions is ~p", [ClientKeys]),
 
     L =
     [begin

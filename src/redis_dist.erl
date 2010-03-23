@@ -92,7 +92,8 @@ to_list(#dist_server{data = List}) ->
 
 %% hash key
 hash_key(Key) ->
-    erlang:phash2(Key, ?KEY_RING_SPACE).
+    KBin = iolist_to_binary(Key),
+    erlang:phash2(KBin, ?KEY_RING_SPACE).
 
 %% do get server
 do_get_server(Key, #dist_server{data = List}) ->
