@@ -6,16 +6,36 @@
 -import(redis_proto, [line/1, line/2, line/3, line/4, line_list/1,
          bulk/3, bulk/4, mbulk/1]).
 
-main(_Args) ->
+-define(HOST, localhost).
+-define(PORT, 6379).
+
+-record(config, {
+    host = ?HOST, 
+    port = ?PORT,
+    clients = 5,
+    requests = 10000
+    }).
+
+usage() ->
+    io:format("usage:\n"),
+    io:format(" redis-benchmark [options]\n"),
+    io:format("  -h Host     - the redis server (default localhost)\n"),
+    io:format("  -p Port     - the redis server port (default 6379) \n"),
+    io:format("  -c Clients  - the concurrent request client number (default 5) \n"),
+    io:format("  -n Count    - the total requests count (default 10000) \n"),
+    io:format("\n\n").
+
+main(Args) ->
+    usage(),
+    Config = parse_args(Args),
+    %io:format("args is ~p", [Args]),
     crypto:start(),
     code:add_path("../ebin"),
     true = erlang:system_info(smp_support),
     redis_app:start(),
-    ok = redis:single_server(localhost, 6379, 5, "litao"),
+    ok = redis:single_server(Config#config.host, Config#config.port, 10, "litao"),
 
-    Requests = 100000,
-    NumClients = 5, 
-    [do_bench(F, Requests, NumClients, Title) ||
+    [do_bench(F, Config#config.requests, Config#config.clients, Title) ||
         {F, Title} <- action_list()].
 
 do_bench(F, N, Conc, Title) ->
@@ -70,5 +90,18 @@ action_list() ->
      {?F(redis:list_pop_head("mylist")), "LPOP"}
     ].
 
+parse_args(Args) ->
+    parse_args(Args, #config{}).
 
-
+parse_args(["-h", Host | T], Config) ->
+    parse_args(T, Config#config{host = Host});
+parse_args(["-p", Port | T], Config) ->
+    parse_args(T, Config#config{port = list_to_integer(Port)});
+parse_args(["-c", Clients | T], Config) ->
+    parse_args(T, Config#config{clients = list_to_integer(Clients)});
+parse_args(["-n", N | T], Config) ->
+    parse_args(T, Config#config{requests = list_to_integer(N)});
+parse_args([_ | T], Config) ->
+    parse_args(T, Config);
+parse_args([], Config) ->
+    Config.

@@ -22,7 +22,7 @@
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
                             terminate/2, code_change/3]).
 
--compile({inline, [get_client/1]}).
+-compile({inline, [manager_name/1, manager_pid/0, get_client/1]}).
 
 -record(state, {
         type = undefined :: server_type(),  % the servers type
