@@ -17,6 +17,9 @@
 -compile(inline).
 -compile({inline_size, 30}).
 
+-import(redis_proto, [line/1, line/2, line/3, line/4, line_list/1,
+         bulk/3, bulk/4, mbulk/1]).
+
 %% connection pool size
 -define(DEF_POOL, 2).
 
@@ -76,6 +79,17 @@ multi_servers(Servers, Passwd) ->
 %%------------------------------------------------------------------------------
 %% generic commands
 %%------------------------------------------------------------------------------
+
+%% @doc ping the redis server
+-spec ping() -> 'ok' | {'error', [server_regname()]}.
+ping() ->
+    {_Replies, BadServers} = call_clients_one(line(<<"PING">>)),
+    case BadServers of
+        [] ->
+            ok;
+        [_|_] ->
+            {error, BadServers}
+    end.
 
 %% @doc test if the specified key exists
 %% O(1)
@@ -495,7 +509,7 @@ bg_rewrite_aof() ->
 %% @doc return the info about the server
 -spec info() -> [{server_regname(), value()}].
 info() ->
-    {Replies, BadServers} = call_clients_one(line(<<"INFO">>)),
+    {Replies, _BadServers} = call_clients_one(line(<<"INFO">>)),
     Replies.
 
 %%------------------------------------------------------------------------------
@@ -503,46 +517,6 @@ info() ->
 %% internal API
 %%
 %%------------------------------------------------------------------------------
-
-%% generate the line 
-line(Type) ->
-    [Type, ?CRLF].
-line(Type, Arg) ->
-    [Type, ?SEP, Arg, ?CRLF].
-line(Type, Arg1, Arg2) ->
-    [Type, ?SEP, Arg1, ?SEP, Arg2, ?CRLF].
-line(Type, Arg1, Arg2, Arg3) ->
-    [Type, ?SEP, Arg1, ?SEP, Arg2, ?SEP, Arg3, ?CRLF].
-line_list(Parts) ->
-    [?SEP | Line] = 
-    lists:foldr(
-        fun(P, Acc) ->
-            [?SEP, P | Acc]
-        end,
-    [?CRLF], Parts),
-    Line.
-
-%% generate the bulk command
-bulk(Type, Arg1, Arg2) ->
-    L1 = line(Type, Arg1, ?N2S(iolist_size(Arg2))),
-    L2 = line(Arg2),
-    [L1, L2].
-bulk(Type, Arg1, Arg2, Arg3) ->
-    L1 = line(Type, Arg1, Arg2, ?N2S(iolist_size(Arg3))),
-    L2 = line(Arg3),
-    [L1, L2].
-
-%% generate the mbulk command
-mbulk(L) ->
-    N = length(L),
-    Lines = [mbulk1(E) || E <- L],
-    ["*", ?N2S(N), ?CRLF | Lines].
-mbulk1(B) when is_binary(B) ->
-    N = byte_size(B),
-    ["$", ?N2S(N), ?CRLF, B, ?CRLF];
-mbulk1(L) when is_list(L) ->
-    N = length(L),
-    ["$", ?N2S(N), ?CRLF, L, ?CRLF].
 
 %% send the command 
 call(Client, Cmd) ->

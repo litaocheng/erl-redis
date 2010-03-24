@@ -24,13 +24,13 @@
         server,             % the host and port
         index,              % the index in connection pool
         sock = null,        % the socket
-        db = 0,             % the default db index
-        dummy
+        db = 0              % the default db index
     }).
 
 -define(TCP_OPTS, [inet, binary, {active, false}, 
             {packet, line}, {nodelay, true},
             {recbuf, 102400},
+            {sndbuf, 102400},
             {send_timeout, 5000}, {send_timeout_close, true}]).
 
 %% @doc start_link the redis_client server

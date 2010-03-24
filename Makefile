@@ -12,7 +12,7 @@ all: test_compile
 
 compile:
 	(mkdir -p ./ebin)
-	(cd src;$(MAKE))
+	(cd src;$(MAKE) NOLOG=true)
 
 test_compile: 
 	(mkdir -p ./ebin)

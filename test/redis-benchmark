@@ -1,0 +1,74 @@
+#!/usr/bin/env escript
+%% -*- erlang -*-
+%%! -smp enable +A 16 +K true
+-mode(compile).
+-compile(inline).
+-import(redis_proto, [line/1, line/2, line/3, line/4, line_list/1,
+         bulk/3, bulk/4, mbulk/1]).
+
+main(_Args) ->
+    crypto:start(),
+    code:add_path("../ebin"),
+    true = erlang:system_info(smp_support),
+    redis_app:start(),
+    ok = redis:single_server(localhost, 6379, 5, "litao"),
+
+    Requests = 10000,
+    NumClients = 5, 
+    [do_bench(F, Requests, NumClients, Title) ||
+        {F, Title} <- action_list()].
+
+do_bench(F, N, Conc, Title) ->
+    NP = N div Conc,
+    Parent = self(),
+
+    T1 = now(),
+    % spawn the clients
+    Pids = [start_client(Parent, F, NP) || _ <- lists:duplicate(Conc, 0)],
+    Counts = 
+    [receive 
+        {ack, P, CN} ->
+            CN
+    end || P <- Pids],
+    T2 = now(),
+
+    T = timer:now_diff(T2, T1),
+    N2 = lists:sum(Counts),
+    Second = T/1000000,
+    io:format("===== ~p ======\n", [Title]),
+    io:format("~p requests completed in ~.2f s\n", [N2, Second]),
+    io:format("~p requests per second\n", [round(N2/Second)]),
+    ok.
+
+start_client(Parent, F, NP) ->
+    spawn(
+    fun() ->
+        do_times(F, NP),
+        Parent ! {ack, self(), NP}
+    end).
+
+do_times(_F, 0) ->
+    ok;
+do_times(F, N) ->
+    case is_function(F, 0) of
+        true ->
+            F();
+        false ->
+            F(integer_to_list(N))
+    end,
+    do_times(F, N-1).
+
+-define(F(Expr),
+    (fun() -> Expr end)).
+
+action_list() ->
+    [{?F(redis:ping()), "PING"},
+     {fun(N) -> redis:set("foo_rand000000000000", N) end, "SET"},
+     {?F(redis:get("foo_rand000000000000")), "GET"},
+     {?F(redis:incr("counter_rand000000000000")), "INCR"},
+     {?F(redis:list_push_head("mylist", <<"bar">>)), "LPUSH"},
+     {?F(redis:list_pop_head("mylist")), "LPOP"}
+    ].
+
+
+

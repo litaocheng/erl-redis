@@ -12,9 +12,67 @@
 -vsn('0.1').
 -include("redis.hrl").
 
--compile([opt_bin_info]).
+-export([line/1, line/2, line/3, line/4, line_list/1,
+         bulk/3, bulk/4, mbulk/1]).
 -export([parse_reply/2]).
 -export([tokens/2]).
+
+-compile([opt_bin_info]).
+-compile(inline).
+
+%% @doc generate the line 
+-spec line(iolist()) -> iolist().
+line(Type) ->
+    [Type, ?CRLF].
+
+-spec line(iolist(), iolist()) ->
+    iolist().
+line(Type, Arg) ->
+    [Type, ?SEP, Arg, ?CRLF].
+
+-spec line(iolist(), iolist(), iolist()) -> 
+    iolist().
+line(Type, Arg1, Arg2) ->
+    [Type, ?SEP, Arg1, ?SEP, Arg2, ?CRLF].
+
+-spec line(iolist(), iolist(), iolist(), iolist()) -> 
+    iolist().
+line(Type, Arg1, Arg2, Arg3) ->
+    [Type, ?SEP, Arg1, ?SEP, Arg2, ?SEP, Arg3, ?CRLF].
+
+-spec line_list([iolist()]) ->
+    iolist().
+line_list(Parts) ->
+    [?SEP | Line] = 
+    lists:foldr(
+        fun(P, Acc) ->
+            [?SEP, P | Acc]
+        end,
+    [?CRLF], Parts),
+    Line.
+
+%% @doc generate the bulk command
+-spec bulk(iolist(), iolist(), iolist()) -> 
+    iolist().
+bulk(Type, Arg1, Arg2) ->
+    L1 = line(Type, Arg1, ?N2S(iolist_size(Arg2))),
+    L2 = line(Arg2),
+    [L1, L2].
+
+-spec bulk(iolist(), iolist(), iolist(), iolist()) -> 
+    iolist().
+bulk(Type, Arg1, Arg2, Arg3) ->
+    L1 = line(Type, Arg1, Arg2, ?N2S(iolist_size(Arg3))),
+    L2 = line(Arg3),
+    [L1, L2].
+
+%% @doc generate the mbulk command
+-spec mbulk(L :: [iolist()]) ->
+    iolist().
+mbulk(L) ->
+    N = length(L),
+    Lines = [mbulk1(E) || E <- L],
+    ["*", ?N2S(N), ?CRLF | Lines].
 
 %% @doc parse the reply
 -spec parse_reply(Bin :: binary(), Sock :: port()) ->
@@ -37,12 +95,21 @@ tokens(S, Sep) when is_integer(Sep) ->
     ?DEBUG2("string is ~p sep is ~p", [S, Sep]),
     tokens1(S, Sep, []).
 
+
 %%
 %%------------------------------------------------------------------------------
 %%
 %% internal API
 %%
 %%------------------------------------------------------------------------------
+
+%% generte mbulk command line
+mbulk1(B) when is_binary(B) ->
+    N = byte_size(B),
+    ["$", ?N2S(N), ?CRLF, B, ?CRLF];
+mbulk1(L) when is_list(L) ->
+    N = length(L),
+    ["$", ?N2S(N), ?CRLF, L, ?CRLF].
 
 %% tokens
 tokens1(<<C, Rest/binary>>, C, Toks) ->
