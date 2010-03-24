@@ -123,7 +123,7 @@ dist_test_() ->
     Range = ?KEY_RING_SPACE div 3,
     Data = [{0, Srv1}, {Range, Srv2}, {Range*2, Srv3}],
     Dist = #dist_server{data = Data},
-    KList = [{k1, v1}, {k2, v2}, {k3, v3}],
+    KList = [{"k1", v1}, {"k2", v2}, {"k3", v3}],
     KFun = fun({K, _V}) -> K end,
 
     [

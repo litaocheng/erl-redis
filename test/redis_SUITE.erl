@@ -90,7 +90,7 @@ cmd_string(Config) ->
     <<"hello">> = ?PF(redis:getset("key1", "hi")),
     <<"world">> = ?PF(redis:get(<<"key2">>)),
     [<<"hi">>, <<"world">>, null] = ?PF(redis:multi_get(["key1", <<"key2">>, <<"key_not_exists">>])),
-    bool(?PF(redis:set_not_exists("key4", "val4"))),
+    bool(?PF(redis:not_exists_set("key4", "val4"))),
     catch ?PF(redis:multi_set([{"key1", "val1"}, {"key2", "val2"}, {"key22", "val22"}])),
     catch ?PF(redis:multi_set_not_exists([{"key1", "val1"}, {"key2", "val2"}, {"key22", "val22"}])),
     ok = ?PF(redis:set("key_num_1", "100")),
@@ -121,7 +121,30 @@ cmd_list(Config) ->
 
     ok.
 
-cmd_set(_Config) -> ok.
+cmd_set(_Config) -> 
+    true = ?PF(redis:set_add("myset", "s1")),
+    false = ?PF(redis:set_rm("myset", "s2")),
+    <<"s1">> = ?PF(redis:set_pop("myset")),
+    true = ?PF(redis:set_add("myset", "s2")),
+    true = ?PF(redis:set_move("myset", "myset2", "s2")),
+    0 = ?PF(redis:set_len("myset")),
+    1 = ?PF(redis:set_len("myset2")),
+    false = ?PF(redis:set_is_member("myset", "s2")),
+    true = ?PF(redis:set_is_member("myset2", "s2")),
+    ?PF(redis:set_inter(["myset", "myset2"])),
+    ?PF(redis:set_inter_store("myset11", ["myset", "myset2"])),
+    ?PF(redis:set_union(["myset", "myset2"])),
+    ?PF(redis:set_union_store("myset22", ["myset", "myset2"])),
+    ?PF(redis:set_diff("myset", ["myset3", "myset2"])),
+    ?PF(redis:set_diff_store("myset33", "myset", ["myset3", "myset2"])),
+
+    redis:set_inter_store("myset", ["myset_not_exists"]),
+    redis:set_add("myset", "s1"),
+    [<<"s1">>] = ?PF(redis:set_members("myset")),
+    <<"s1">> = ?PF(redis:set_random_member("myset")),
+    
+    ok.
+
 cmd_hash(_Config) -> ok.
 
 cmd_persistence(Config) -> 

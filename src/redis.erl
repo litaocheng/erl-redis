@@ -162,7 +162,7 @@ random_key() ->
 -spec rename(OldKey :: key(), NewKey :: key()) -> 
     'ok' | error_reply().
 rename(OldKey, NewKey) ->
-    {ok, Client} = redis_manager:get_client_smode(OldKey),
+    {ok, Client} = redis_manager:get_client_smode(),
     call(Client, line(<<"RENAME">>, OldKey, NewKey)).
 
 %% @doc  rename oldkey into newkey  but fails if the destination key newkey already exists. 
@@ -171,7 +171,7 @@ rename(OldKey, NewKey) ->
 -spec rename_not_exists(OldKey :: key(), NewKey :: key()) -> 
     boolean() | error_reply().
 rename_not_exists(OldKey, NewKey) ->
-    {ok, Client} = redis_manager:get_client_smode(OldKey),
+    {ok, Client} = redis_manager:get_client_smode(),
     R = call(Client, line(<<"RENAMENX">>, OldKey, NewKey)),
     int_may_bool(R).
 
@@ -227,7 +227,7 @@ select(Index) ->
 -spec move(Key :: key(), DBIndex :: index()) ->
     boolean() | error_reply().
 move(Key, DBIndex) ->
-    {ok, Client} = redis_manager:get_client_smode(Key),
+    {ok, Client} = redis_manager:get_client_smode(),
     R = call(Client, line(<<"MOVE">>, Key, ?N2S(DBIndex))),
     int_may_bool(R).
 
@@ -305,9 +305,9 @@ multi_get(Keys) ->
 
 %% @doc set value, if the key already exists no operation is performed
 %% O(1)
--spec set_not_exists(Key :: key(), Val :: string()) -> 
+-spec not_exists_set(Key :: key(), Val :: string()) -> 
     boolean().
-set_not_exists(Key, Val) ->
+not_exists_set(Key, Val) ->
     R = call_key(Key, bulk(<<"SETNX">>, Key, Val)),
     int_bool(R).
 
@@ -457,8 +457,128 @@ list_pop_tail(Key) ->
 %% NOTE: MUST single mode
 %% O(1)
 list_tail_to_head(SrcKey, DstKey) ->
-    {ok, Client} = redis_manager:get_client_smode(SrcKey),
+    {ok, Client} = redis_manager:get_client_smode(),
     call(Client, line(<<"RPOPLPUSH">>, SrcKey, DstKey)).
+
+%%------------------------------------------------------------------------------
+%% set commands 
+%%------------------------------------------------------------------------------
+
+%% @doc add Mem to the set stored at Key
+%% O(1)
+-spec set_add(Key :: key(), Mem :: str()) ->
+    boolean().
+set_add(Key, Mem) ->
+    R = call_key(Key, bulk(<<"SADD">>, Key, Mem)),
+    int_bool(R).
+
+%% @doc remove the specified member from the set
+-spec set_rm(Key :: key(), Mem :: str()) ->
+    boolean().
+set_rm(Key, Mem) ->
+    R = call_key(Key, bulk(<<"SREM">>, Key, Mem)),
+    int_bool(R).
+
+%% @doc remove a random member from the set, returning it as return value
+%% O(1)
+-spec set_pop(Key :: key()) ->
+    value().
+set_pop(Key) ->
+    call_key(Key, line(<<"SPOP">>, Key)).
+
+%% @doc atomically move the member form one set to another
+%% NOTE: MUST single mode
+%% O(1)
+-spec set_move(Src :: key(), Dst :: key(), Mem :: str()) ->
+    boolean().
+set_move(Src, Dst, Mem) ->
+    {ok, Client} = redis_manager:get_client_smode(),
+    R = call(Client, bulk(<<"SMOVE">>, Src, Dst, Mem)),
+    int_bool(R).
+
+%% @doc return the number of elements in set
+%% O(1)
+-spec set_len(Key :: key()) ->
+    integer().
+set_len(Key) ->
+    call_key(Key, line(<<"SCARD">>, Key)).
+
+%% @doc test if the specified value is the member of the set
+%% O(1)
+-spec set_is_member(Key :: key(), Mem :: str()) ->
+    boolean().
+set_is_member(Key, Mem) ->
+    R = call_key(Key, bulk(<<"SISMEMBER">>, Key, Mem)),
+    int_bool(R).
+
+%% @doc return the intersection between the sets
+%% NOTE: MUST single mode
+%% O(N*M)
+-spec set_inter(Keys :: [key()]) ->
+    [value()].
+set_inter(Keys) ->
+    {ok, Client} = redis_manager:get_client_smode(),
+    call(Client, line_list([<<"SINTER">> | Keys])).
+
+%% @doc compute the intersection between the sets and save the 
+%% resulting to new set
+-spec set_inter_store(Dst :: key(), Keys :: [key()]) ->
+    'ok' | error().
+set_inter_store(Dst, Keys) ->
+    {ok, Client} = redis_manager:get_client_smode(),
+    call(Client, line_list([<<"SINTERSTORE">>, Dst | Keys])).
+
+%% @doc  return the union of all the sets
+%% NOTE: MUST single mode
+%% O(n)
+-spec set_union(Keys :: [key()]) ->
+    [value()].
+set_union(Keys) ->
+    {ok, Client} = redis_manager:get_client_smode(),
+    call(Client, line_list([<<"SUNION">> | Keys])).
+
+%% @doc compute the union between the sets and save the 
+%% resulting to new set
+%% NOTE: MUST single mode
+%% O(n)
+-spec set_union_store(Dst :: key(), Keys :: [key()]) ->
+    'ok' | error().
+set_union_store(Dst, Keys) ->
+    {ok, Client} = redis_manager:get_client_smode(),
+    call(Client, line_list([<<"SUNIONSTORE">>, Dst | Keys])).
+
+%% @doc return the difference between the First set and all the other sets
+%% NOTE: MUST single mode
+%% o(n)
+-spec set_diff(First :: key(), Keys :: [key()]) ->
+    [value()].
+set_diff(First, Keys) ->
+    {ok, Client} = redis_manager:get_client_smode(),
+    call(Client, line_list([<<"SDIFF">>, First | Keys])).
+
+%% @doc compute the difference between the sets and save the 
+%% resulting to new set
+%% NOTE: MUST single mode
+%% O(n)
+-spec set_diff_store(Dst :: key(), First :: key(), Keys :: [key()]) ->
+    'ok' | error().
+set_diff_store(Dst, First, Keys) ->
+    {ok, Client} = redis_manager:get_client_smode(),
+    call(Client, line_list([<<"SDIFFSTORE">>, Dst, First | Keys])).  
+
+%% @doc return all the members in the set
+%% O(1)
+-spec set_members(Key :: key()) ->
+    [value()].
+set_members(Key) ->
+    call_key(Key, line(<<"SMEMBERS">>, Key)).
+
+%% @doc return a random member from the set
+%% O(1)
+-spec set_random_member(Key :: key()) ->
+    value().
+set_random_member(Key) ->
+    call_key(Key, line(<<"SRANDMEMBER">>, Key)).
 
 %%------------------------------------------------------------------------------
 %% persistence commands 
