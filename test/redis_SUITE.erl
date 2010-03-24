@@ -46,6 +46,7 @@ all() ->
     cmd_list,
     cmd_set,
     cmd_hash,
+    cmd_persistence,
     test_dummy].
 
 %%-------------------------------------------------------------------------
@@ -120,8 +121,16 @@ cmd_list(Config) ->
 
     ok.
 
-cmd_set(Config) -> ok.
-cmd_hash(Config) -> ok.
+cmd_set(_Config) -> ok.
+cmd_hash(_Config) -> ok.
+
+cmd_persistence(Config) -> 
+    ?PF(redis:save()),
+    ?PF(redis:bg_save()),
+    ?PF(redis:lastsave_time()),
+    ?PF(redis:info()),
+    ?PF(redis:bg_rewrite_aof()),
+    ok.
 
 bool(true) -> ok;
 bool(false) -> ok.

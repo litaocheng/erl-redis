@@ -416,7 +416,7 @@ list_rm(Key, Val) ->
 list_rm_head(Key, N, Val) ->
     call_key(Key, bulk(<<"LREM">>, Key, ?N2S(N), Val)).
 
-%% @doc remove the first N occurrences of the value from tail 
+%% @doc remove the first N occurrences of the value from tail to
 %% head in the list
 %% O(n)
 -spec list_rm_tail(Key :: key(), N :: pos_integer(), Val :: str()) ->
@@ -445,6 +445,58 @@ list_pop_tail(Key) ->
 list_tail_to_head(SrcKey, DstKey) ->
     {ok, Client} = redis_manager:get_client_smode(SrcKey),
     call(Client, line(<<"RPOPLPUSH">>, SrcKey, DstKey)).
+
+%%------------------------------------------------------------------------------
+%% persistence commands 
+%%------------------------------------------------------------------------------
+
+%% @doc synchronously save the DB on disk
+-spec save() -> 'ok' | error().
+save() ->
+    {_Replies, BadServers} = call_clients_one(line(<<"SAVE">>)),
+    case BadServers of
+        [] ->
+            ok;
+        [_|_] ->
+            {error, BadServers}
+    end.
+
+%% @doc save the DB in background
+-spec bg_save() -> 'ok' | error().
+bg_save() ->
+    {_Replies, BadServers} = call_clients_one(line(<<"BGSAVE">>)),
+    case BadServers of
+        [] ->
+            ok;
+        [_|_] ->
+            {error, BadServers}
+    end.
+
+%% @doc return the UNIX time that the last DB save excuted with success
+-spec lastsave_time() -> [{server_regname(), timestamp()}].
+lastsave_time() ->
+    {Replies, _BadServers} = call_clients_one(line(<<"LASTSAVE">>)),
+    Replies.
+
+%% @doc rewrite the append only log in background
+-spec bg_rewrite_aof() -> 'ok' | error().
+bg_rewrite_aof() ->
+    {_Replies, BadServers} = call_clients_one(line(<<"BGREWRITEAOF">>)),
+    case BadServers of
+        [] ->
+            ok;
+        [_|_] ->
+            {error, BadServers}
+    end.
+
+%%------------------------------------------------------------------------------
+%% remote server control commands 
+%%------------------------------------------------------------------------------
+%% @doc return the info about the server
+-spec info() -> [{server_regname(), value()}].
+info() ->
+    {Replies, BadServers} = call_clients_one(line(<<"INFO">>)),
+    Replies.
 
 %%------------------------------------------------------------------------------
 %%
