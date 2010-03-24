@@ -13,7 +13,7 @@ main(_Args) ->
     redis_app:start(),
     ok = redis:single_server(localhost, 6379, 5, "litao"),
 
-    Requests = 10000,
+    Requests = 100000,
     NumClients = 5, 
     [do_bench(F, Requests, NumClients, Title) ||
         {F, Title} <- action_list()].

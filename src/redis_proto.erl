@@ -18,7 +18,8 @@
 -export([tokens/2]).
 
 -compile([opt_bin_info]).
--compile(inline).
+-compile({inline, [line/1, line/2, line/3, line/4, line_list/1,
+         bulk/3, bulk/4, mbulk/1]}).  
 
 %% @doc generate the line 
 -spec line(iolist()) -> iolist().
