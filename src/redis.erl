@@ -581,6 +581,48 @@ set_random_member(Key) ->
     call_key(Key, line(<<"SRANDMEMBER">>, Key)).
 
 %%------------------------------------------------------------------------------
+%% sorted set commands 
+%%------------------------------------------------------------------------------
+
+%%------------------------------------------------------------------------------
+%% hash commands 
+%%------------------------------------------------------------------------------
+
+%% @doc set specified hash filed with Val
+%% O(1)
+-spec hash_set(Key :: key(), Field :: key(), Val :: str()) ->
+    boolean().
+hash_set(Key, Field, Val) ->
+    R = call_key(Key, bulk(<<"HSET">>, Key, Field, Val)),
+    int_bool(R).
+
+%% @doc retrieve the value of the specified hash field
+%% O(1)
+-spec hash_get(Key :: key(), Field :: key()) ->
+    value().
+hash_get(Key, Field) ->
+    call_key(Key, line(<<"HGET">>, Key, Field)).
+
+%% @doc
+hash_del(Key, Field) ->
+    false.
+
+hash_exists(Key, Field) ->
+    false.
+
+hash_len(Key) ->
+    0.
+
+hash_keys(Key) ->
+    [null].
+
+hash_vals(Key) ->
+    [null].
+
+hash_get_all(Key) ->
+    [{null, null}].
+
+%%------------------------------------------------------------------------------
 %% persistence commands 
 %%------------------------------------------------------------------------------
 
