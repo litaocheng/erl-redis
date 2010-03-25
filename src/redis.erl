@@ -138,9 +138,7 @@ type(Key) ->
 -spec keys(Pattern :: pattern()) -> 
     {[key()], [server()]}.
 keys(Pattern) ->
-    {Replies, BadServers} = call_clients_one(line(<<"KEYS">>, Pattern)),
-    Keys = lists:append([redis_proto:tokens(R, ?SEP) || {_Server, R} <- Replies]),
-    {Keys, BadServers}.
+    call_clients_one(line(<<"KEYS">>, Pattern)).
 
 %% @doc return a randomly selected key from the currently selected DB
 %% O(1)
@@ -366,9 +364,10 @@ decr(Key, N) ->
 %%------------------------------------------------------------------------------
 
 %% @doc add the string Val to the tail of the list stored at Key
+%% returnt he current list length
 %% O(1)
 -spec list_push_tail(Key :: key(), Val :: str()) ->
-    'ok' | error().
+    integer().
 list_push_tail(Key, Val) ->
     call_key(Key, bulk(<<"RPUSH">>, Key, Val)).
 
@@ -593,7 +592,7 @@ set_random_member(Key) ->
 -spec hash_set(Key :: key(), Field :: key(), Val :: str()) ->
     boolean().
 hash_set(Key, Field, Val) ->
-    R = call_key(Key, bulk(<<"HSET">>, Key, Field, Val)),
+    R = call_key(Key, mbulk([<<"HSET">>, Key, Field, Val])),
     int_bool(R).
 
 %% @doc retrieve the value of the specified hash field
@@ -601,26 +600,57 @@ hash_set(Key, Field, Val) ->
 -spec hash_get(Key :: key(), Field :: key()) ->
     value().
 hash_get(Key, Field) ->
-    call_key(Key, line(<<"HGET">>, Key, Field)).
+    call_key(Key, bulk(<<"HGET">>, Key, Field)).
 
-%% @doc
+%% @doc remove the sepcified field from the hash
+%% O(1)
+-spec hash_del(Key :: key(), Field :: key()) ->
+    boolean().
 hash_del(Key, Field) ->
-    false.
+    R = call_key(Key, bulk(<<"HDEL">>, Key, Field)),
+    int_bool(R).
 
+%% @doc test if the field exists in the hash
+%% O(1)
+-spec hash_exists(Key :: key(), Field :: key()) ->
+    boolean().
 hash_exists(Key, Field) ->
-    false.
+    R = call_key(Key, bulk(<<"HEXISTS">>, Key, Field)),
+    int_bool(R).
 
+%% @doc return the number of items in hash
+%% O(1)
+-spec hash_len(Key :: key()) ->
+    integer().
 hash_len(Key) ->
-    0.
+    call_key(Key, line(<<"HLEN">>, Key)).
 
+%% @doc return all the fields in hash
+%% O(n)
+-spec hash_keys(Key :: key()) ->
+    [value()].
 hash_keys(Key) ->
-    [null].
+    call_key(Key, line(<<"HKEYS">>, Key)).
 
+%% @doc return all the values in hash
+-spec hash_vals(Key :: key()) ->
+    [value()].
 hash_vals(Key) ->
-    [null].
+    call_key(Key, line(<<"HVALS">>, Key)).
 
-hash_get_all(Key) ->
-    [{null, null}].
+%% @doc return a tuple list include both the fields and values in hash
+hash_all(Key) ->
+    KFList = call_key(Key, line(<<"HGETALL">>, Key)),
+    {odd, null, AccL} =
+    lists:foldl(
+        fun
+            (E, {odd, null, AccL}) ->
+                {even, E, AccL};
+            (E, {even, EFirst, AccL}) ->
+                {odd, null, [{EFirst, E} | AccL]}
+        end,
+    {odd, null, []}, KFList),
+    AccL.
 
 %%------------------------------------------------------------------------------
 %% persistence commands 

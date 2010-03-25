@@ -102,9 +102,9 @@ cmd_string(Config) ->
     ok.
 
 cmd_list(Config) -> 
-    ok = ?PF(redis:list_push_tail("mylist", "e1")),
+    1 = ?PF(redis:list_push_tail("mylist", "e1")),
     {error, _} = ?PF(redis:list_push_tail("key1", "e1")),
-    ok = ?PF(redis:list_push_head("mylist", "e2")),
+    2 = ?PF(redis:list_push_head("mylist", "e2")),
     int(?PF(redis:list_len("mylist"))),
     [_|_] = ?PF(redis:list_range("mylist", 0, -1)),
     [_] = ?PF(redis:list_range("mylist", 0, 0)),
@@ -145,7 +145,22 @@ cmd_set(_Config) ->
     
     ok.
 
-cmd_hash(_Config) -> ok.
+cmd_hash(_Config) -> 
+    true = ?PF(redis:hash_set("myhash", "f1", "v1")),
+    <<"v1">> = ?PF(redis:hash_get("myhash", "f1")),
+    null = ?PF(redis:hash_get("myhash", "f2")),
+    true = ?PF(redis:hash_del("myhash", "f1")),
+    false = ?PF(redis:hash_del("myhash", "f2")),
+
+    true = ?PF(redis:hash_set("myhash", "f1", "v1")),
+    %?PF(redis:hash_exists("myhash", "f1")),
+    %?PF(redis:hash_exists("myhash", "f2")),
+    true = ?PF(redis:hash_set("myhash", "f2", "v2")),
+    2 = ?PF(redis:hash_len("myhash")),
+    [<<"f1">>, <<"f2">>] = ?PF(redis:hash_keys("myhash")),
+    [<<"v1">>, <<"v2">>] = ?PF(redis:hash_vals("myhash")),
+    [{<<"f2">>, <<"v2">>}, {<<"f1">>, <<"v1">>}] = ?PF(redis:hash_all("myhash")),
+    ok.
 
 cmd_persistence(Config) -> 
     ?PF(redis:save()),
