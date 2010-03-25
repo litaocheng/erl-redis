@@ -65,6 +65,7 @@
 -type val_type() :: 'none' | 'string' | 'list' | 'set'.
 -type status_code() :: atom().
 -type error() :: {'error', any()}.
+-type score() :: integer() | float() | [byte()].
 
 -type inet_host() :: atom() | string() | binary().
 -type inet_port() :: 0..65535.

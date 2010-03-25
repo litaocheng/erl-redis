@@ -45,6 +45,7 @@ all() ->
     cmd_string,
     cmd_list,
     cmd_set,
+    cmd_zset,
     cmd_hash,
     cmd_persistence,
     test_dummy].
@@ -145,6 +146,34 @@ cmd_set(_Config) ->
     
     ok.
 
+cmd_zset(_Config) ->
+    true = ?PF(redis:zset_add("myzset", "f1", 1)),
+    true = ?PF(redis:zset_rm("myzset", "f1")),
+    2 = ?PF(redis:zset_incr("myzset", "f1", 2)),
+    1 = ?PF(redis:zset_incr("myzset", "f1", -1)),
+    0 = ?PF(redis:zset_index("myzset", "f1")),
+    true = redis:zset_add("myzset", "f2", 2),
+    true = redis:zset_add("myzset", "f3", 3),
+    [<<"f1">>, <<"f2">>, <<"f3">>] = 
+        ?PF(redis:zset_range_index("myzset", 0, -1, false)),
+    [<<"f2">>, <<"f3">>] = 
+        ?PF(redis:zset_range_index("myzset", -2, -1, false)),
+    [{<<"f1">>, 1}, {<<"f2">>, 2}, {<<"f3">>, 3}] = 
+        ?PF(redis:zset_range_index("myzset", 0, -1, true)),
+    ?PF(redis:zset_range_index_reverse("myzset", 0, -1, true)),
+    [<<"f1">>, <<"f2">>, <<"f3">>] = 
+        ?PF(redis:zset_range_score("myzset", 0, 100, false)),
+    [{<<"f1">>, 1}, {<<"f2">>, 2}, {<<"f3">>, 3}] =
+        ?PF(redis:zset_range_score("myzset", 0, 100, true)),
+    [<<"f1">>] =
+        ?PF(redis:zset_range_score("myzset", 0, 100, 0, 1, false)),
+    [{<<"f1">>, 1}] = 
+        ?PF(redis:zset_range_score("myzset", 0, 100, 0, 1, true)),
+    1 = ?PF(redis:zset_rm_by_score("myzset", 0, 1)),
+    2 = ?PF(redis:zset_len("myzset")),
+    null = ?PF(redis:zset_score("myzset", "f1")),
+    ok.
+
 cmd_hash(_Config) -> 
     true = ?PF(redis:hash_set("myhash", "f1", "v1")),
     <<"v1">> = ?PF(redis:hash_get("myhash", "f1")),
@@ -159,7 +188,7 @@ cmd_hash(_Config) ->
     2 = ?PF(redis:hash_len("myhash")),
     [<<"f1">>, <<"f2">>] = ?PF(redis:hash_keys("myhash")),
     [<<"v1">>, <<"v2">>] = ?PF(redis:hash_vals("myhash")),
-    [{<<"f2">>, <<"v2">>}, {<<"f1">>, <<"v1">>}] = ?PF(redis:hash_all("myhash")),
+    [{<<"f1">>, <<"v1">>}, {<<"f2">>, <<"v2">>}] = ?PF(redis:hash_all("myhash")),
     ok.
 
 cmd_persistence(Config) -> 

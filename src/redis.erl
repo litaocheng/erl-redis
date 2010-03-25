@@ -588,7 +588,7 @@ set_random_member(Key) ->
 -spec zset_add(Key :: key(), Mem :: str(), Score :: score()) ->
     boolean().
 zset_add(Key, Mem, Score) ->
-    R = call_key(Key, bulk(<<"ZADD">>, Key, Score, Mem)),
+    R = call_key(Key, mbulk([<<"ZADD">>, Key, ?N2S(Score), Mem])),
     int_bool(R).
 
 %% @doc remove the specified member from the sorted set
@@ -603,14 +603,15 @@ zset_rm(Key, Mem) ->
 %% otherwise add the member setting N as score
 %% O(log(N))
 -spec zset_incr(Key :: key(), Mem :: str(), N :: integer()) ->
-    boolean().
+    score().
 zset_incr(Key, Mem, N) ->
     R = call_key(Key, bulk(<<"ZINCRBY">>, Key, ?N2S(N), Mem)),
-    int_bool(R).
+    string_to_score(R).
 
 %% @doc return the index(rank) of member in the sorted set, the scores being
 %% ordered from low to high
 %% O(log(N))
+%% Reids >= 1.3.4
 -spec zset_index(Key :: key(), Mem :: key()) ->
     integer().
 zset_index(Key, Mem) ->
@@ -619,6 +620,7 @@ zset_index(Key, Mem) ->
 %% @doc return the index(rank) of member in the sorted set, the scores being 
 %% ordered from high to low
 %% O(log(N))
+%% Reids >= 1.3.4
 -spec zset_reverse_index(Key :: key(), Mem :: key()) ->
     integer().
 zset_reverse_index(Key, Mem) ->
@@ -626,22 +628,22 @@ zset_reverse_index(Key, Mem) ->
 
 %% @doc return a range of elements from the sorted set
 %% O(log(N))+O(M)
--spec zset_range(Key :: key(), Start :: index(), End :: index(), 
+-spec zset_range_index(Key :: key(), Start :: index(), End :: index(), 
         WithScore :: boolean()) -> [value()].
-zset_range(Key, Start, End, WithScore) ->
-    zset_range_index(<<"ZRANGE">>, Key, Start, End, WithScore).
+zset_range_index(Key, Start, End, WithScore) ->
+    do_zset_range_index(<<"ZRANGE">>, Key, Start, End, WithScore).
 
-%% @doc return a range of elements form the sorted set, like zset_range, but 
+%% @doc return a range of elements form the sorted set, like zset_range_index, but 
 %% the sorted set is ordered in traversed in reverse order.
--spec zset_reverse_range(Key :: key(), Start :: index(), End :: index(),
+-spec zset_range_index_reverse(Key :: key(), Start :: index(), End :: index(),
         WithScore :: boolean()) -> [value()].
-zset_reverse_range(Key, Start, End, WithScore) ->
-    zset_range_index(<<"ZREVRANGE">>, Key, Start, End, WithScore).
+zset_range_index_reverse(Key, Start, End, WithScore) ->
+    do_zset_range_index(<<"ZREVRANGE">>, Key, Start, End, WithScore).
 
 %% @doc return all elements with score in the specified scope
--spec zset_score_range(Key :: key(), Min :: score(), Max :: score(), 
+-spec zset_range_score(Key :: key(), Min :: score(), Max :: score(), 
     WithScore :: boolean()) -> [value()].
-zset_score_range(Key, Min, Max, WithScore) ->
+zset_range_score(Key, Min, Max, WithScore) ->
     case WithScore of
         false ->
             call_key(Key, mbulk([<<"ZRANGEBYSCORE">>, Key, 
@@ -649,13 +651,13 @@ zset_score_range(Key, Min, Max, WithScore) ->
         true ->
             L = call_key(Key, mbulk([<<"ZRANGEBYSCORE">>, Key, 
                 score_to_string(Min), score_to_string(Max), <<"WITHSCORES">>])),
-            list_to_kv_tuple(L)
+            list_to_kv_tuple(L, fun(S) -> string_to_score(S) end)
     end.
 
--spec zset_score_range(Key :: key(), Min :: score(), Max :: score(), 
+-spec zset_range_score(Key :: key(), Min :: score(), Max :: score(), 
     Start :: index(), Count :: integer(), WithScore :: boolean()) ->
         [value()].
-zset_score_range(Key, Min, Max, Start, Count, WithScore) ->
+zset_range_score(Key, Min, Max, Start, Count, WithScore) ->
     case WithScore of
         false ->
             call_key(Key, mbulk([<<"ZRANGEBYSCORE">>, Key, 
@@ -664,7 +666,7 @@ zset_score_range(Key, Min, Max, Start, Count, WithScore) ->
                 <<"LIMIT">>,
                 ?N2S(Start),
                 ?N2S(Count)
-                ));
+                ]));
         true ->
             L = call_key(Key, mbulk([<<"ZRANGEBYSCORE">>, Key, 
                 score_to_string(Min), 
@@ -672,26 +674,24 @@ zset_score_range(Key, Min, Max, Start, Count, WithScore) ->
                 <<"LIMIT">>,
                 ?N2S(Start),
                 ?N2S(Count),
-                <<"WITHSCORES">>,
-                )),
-            list_to_kv_tuple(L)
+                <<"WITHSCORES">>
+                ])),
+            list_to_kv_tuple(L, fun(S) -> string_to_score(S) end)
     end.
 
 %% @doc remove the elements in the sorted set with index between start and end
 %% Redis >= 1.3.4
 -spec zset_rm_by_index(Key :: key(), Start :: index(), End :: index()) ->
-    boolean().
+    integer().
 zset_rm_by_index(Key, Start, End) ->
-    R = call_key(Key, mbulk([<<"ZREMRANGEBYRANK">>, Key, ?N2S(Start), ?N2S(End))),
-    int_bool(R).
+    call_key(Key, mbulk([<<"ZREMRANGEBYRANK">>, Key, ?N2S(Start), ?N2S(End)])).
 
 %% @doc remove the elements in the sorted set with score between start and end
 %% Redis >= 1.1
--spec zset_rm_by_score(Key :: key(), Min :: scroe(), Max :: score()) ->
-    boolean().
+-spec zset_rm_by_score(Key :: key(), Min :: score(), Max :: score()) ->
+    integer().
 zset_rm_by_score(Key, Min, Max) ->
-    R = call_key(Key, mbulk([<<"ZREMRANGEBYSCORE">>, Key, ?N2S(Min), ?N2S(Max))),
-    int_bool(R).
+    call_key(Key, mbulk([<<"ZREMRANGEBYSCORE">>, Key, ?N2S(Min), ?N2S(Max)])).
 
 %% @doc return the number of elements in sorted set
 -spec zset_len(Key :: key()) ->
@@ -701,7 +701,7 @@ zset_len(Key) ->
 
 %% @doc return the score of the element
 -spec zset_score(Key :: key(), Mem :: key()) ->
-    score().
+    'null' | score().
 zset_score(Key, Mem) ->
     call_key(Key, bulk(<<"ZSCORE">>, Key, Mem)).
 
@@ -868,11 +868,11 @@ call_any(Cmd, F) ->
     V.
 
 %% get sorted set range by index
-zset_range_index(Type, Key, Start, End, WithScore).
+do_zset_range_index(Type, Key, Start, End, WithScore) ->
     case WithScore of
         true ->
-            L = call_key(Key, line(Type, Key, ?N2S(Start), ?N2S(End), <<"WITHSCORES">>)),
-            list_to_kv_tuple(L);
+            L = call_key(Key, line_list([Type, Key, ?N2S(Start), ?N2S(End), <<"WITHSCORES">>])),
+            list_to_kv_tuple(L, fun(S) -> string_to_score(S) end);
         false ->
             call_key(Key, line(Type, Key, ?N2S(Start), ?N2S(End)))
     end.
@@ -883,6 +883,16 @@ score_to_string(S) when is_integer(S) ->
 score_to_string(S) when is_list(S) ->
     S.
 
+%% string => score
+string_to_score(B) when is_binary(B) ->
+    string_to_score(binary_to_list(B));
+string_to_score(S) when is_list(S) ->
+    case catch list_to_integer(S) of
+        {'EXIT', _} ->
+            list_to_float(S);
+        N ->
+            N
+    end.
 
 %% convert status code to return
 status_return(<<"OK">>) -> ok;
@@ -908,19 +918,28 @@ get_app_vsn() ->
 
 %% convert list like [f1, v1, f2, v2] to the key-value tuple
 %% [{f1, v1}, {f2, v2}].
-list_to_kv_tuple([]) ->
-    [];
 list_to_kv_tuple(L) ->
+    list_to_kv_tuple(L, null).
+
+list_to_kv_tuple([], _Fun) ->
+    [];
+list_to_kv_tuple(L, Fun) ->
     {odd, null, AccL} =
     lists:foldl(
         fun
             (E, {odd, null, AccL}) ->
                 {even, E, AccL};
             (E, {even, EFirst, AccL}) ->
-                {odd, null, [{EFirst, E} | AccL]}
+                {odd, null, [{EFirst, do_fun(Fun, E)} | AccL]}
         end,
     {odd, null, []}, L),
-    AccL.
+    lists:reverse(AccL).
+
+%% call the function on the element
+do_fun(null, E) ->
+    E;
+do_fun(Fun, E) ->
+    Fun(E).
 
 %%
 %% unit test
