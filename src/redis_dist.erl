@@ -11,7 +11,7 @@
 -module(redis_dist).
 -author('litaocheng@gmail.com').
 -vsn('0.1').
--include("redis.hrl").
+-include("redis_internal.hrl").
 
 -export([new/1]).
 -export([partition_keys/3, get_server/2]).

@@ -10,7 +10,7 @@
 -module(redis_app).
 -author('litaocheng@gmail.com').
 -vsn('0.1').
--include("redis.hrl").
+-include("redis_internal.hrl").
 
 -behaviour(application).
 -behaviour(supervisor).

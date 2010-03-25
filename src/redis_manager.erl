@@ -11,7 +11,7 @@
 -author('litaocheng@gmail.com').
 -vsn('0.1').
 -behaviour(gen_server).
--include("redis.hrl").
+-include("redis_internal.hrl").
 
 -export([start/2, start_link/2]).
 -export([is_started/0, select_db/1]).

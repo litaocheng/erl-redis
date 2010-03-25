@@ -4,7 +4,7 @@
 -compile(export_all).
 
 -include("ct.hrl").
--include("redis.hrl").
+-include("redis_internal.hrl").
 -define(P(F, D), ?INFO2(F, D)).
     
 -define(PF(F), 
@@ -47,6 +47,7 @@ all() ->
     cmd_set,
     cmd_zset,
     cmd_hash,
+    cmd_sort,
     cmd_persistence,
     test_dummy].
 
@@ -189,6 +190,60 @@ cmd_hash(_Config) ->
     [<<"f1">>, <<"f2">>] = ?PF(redis:hash_keys("myhash")),
     [<<"v1">>, <<"v2">>] = ?PF(redis:hash_vals("myhash")),
     [{<<"f1">>, <<"v1">>}, {<<"f2">>, <<"v2">>}] = ?PF(redis:hash_all("myhash")),
+    ok.
+
+cmd_sort(_Config) ->
+    SortOpt = #redis_sort{},
+    ?PF(redis:sort("mylist", SortOpt)),
+
+    redis:list_trim("top_uid", 0, -1),
+    redis:list_push_tail("top_uid", "2"),
+    redis:list_push_tail("top_uid", "5"),
+    redis:list_push_head("top_uid", "8"),
+    redis:list_push_tail("top_uid", "10"),
+
+    redis:set("age_2", "20"),
+    redis:set("age_5", "50"),
+    redis:set("age_8", "80"),
+    redis:set("age_10", "10"),
+
+    redis:set("lastlogin_1", "2010-03-20"),
+    redis:set("lastlogin_2", "2010-02-20"),
+    redis:set("lastlogin_5", "2009-08-21"),
+    redis:set("lastlogin_8", "2008-05-22"),
+    redis:set("lastlogin_10", "2008-04-11"),
+
+    ?PF(redis:sort("top_uid", #redis_sort{})),
+
+    ?PF(redis:sort("top_uid", #redis_sort{
+        asc = false, 
+        limit = {0, 2}
+    })),
+
+    ?PF(redis:sort("top_uid", #redis_sort{
+        asc = false,
+        alpha = true
+    })),
+
+    ?PF(redis:sort("top_uid", #redis_sort{
+        by_pat = <<"age_*">>
+    })),
+
+    ?PF(redis:sort("top_uid", #redis_sort{
+        alpha = true,
+        get_pat = [<<"lastlogin_*">>] 
+    })),
+
+    ?PF(redis:sort("top_uid", #redis_sort{
+        by_pat = <<"age_*">>,
+        get_pat = ["#", "age_*", <<"lastlogin_*">>] 
+    })),
+
+    ?PF(redis:sort("top_uid", #redis_sort{
+        by_pat = <<"lastlogin_*">>,
+        get_pat = ["#", "age_*", <<"lastlogin_*">>] 
+    })),
+
     ok.
 
 cmd_persistence(Config) -> 

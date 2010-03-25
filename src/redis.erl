@@ -10,7 +10,7 @@
 -module(redis).
 -author('ltiaocheng@gmail.com').
 -vsn('0.1').
--include("redis.hrl").
+-include("redis_internal.hrl").
 
 -export([i/0]).
 -compile([export_all]).
@@ -31,8 +31,8 @@ i() ->
 %% @doc return the redis version info
 %% first element is the redis client version,
 %% second element is the lowest redis server version supported
--spec vsn() -> {string(), string()}.
-vsn() ->
+-spec version() -> {string(), string()}.
+version() ->
     {get_app_vsn(), "1.2.5"}.
 
 %% @doc return the server info
@@ -771,6 +771,76 @@ hash_vals(Key) ->
 hash_all(Key) ->
     KFList = call_key(Key, line(<<"HGETALL">>, Key)),
     list_to_kv_tuple(KFList).
+%%------------------------------------------------------------------------------
+%% sort commands
+%%------------------------------------------------------------------------------
+
+%% @doc sort a list or set accordingly to the parameters
+-spec sort(Key :: key(), SortOpt :: redis_sort()) ->
+    list().
+sort(Key, SortOpt) ->
+    #redis_sort{
+        by_pat = By,
+        get_pat = Get,
+        limit = Limit,
+        asc = Asc,
+        alpha = Alpha,
+        store = Store
+    } = SortOpt,
+
+    ByPart = 
+    case By of
+        "" ->
+            [];
+        _ ->
+            [<<"BY">>, By]
+    end,
+
+    LimitPart = 
+    case Limit of
+        null ->
+            [];
+        {Start, End} ->
+            [<<"LIMIT">>, ?N2S(Start), ?N2S(End)]
+    end,
+
+    {FieldCount, GetPart} =
+    case Get of
+        [] ->
+            {1, []};
+        _ ->
+            {length(Get), lists:append([[<<"GET">>, P] || P <- Get])}
+    end,
+
+    AscPart =
+    case Asc of
+        true ->
+            [];
+        false ->
+            [<<"DESC">>]
+    end,
+
+    AlphaPart =
+    case Alpha of
+        false ->
+            [];
+        true ->
+            [<<"ALPHA">>]
+    end,
+
+    StorePart =
+    case Store of
+        "" ->
+            [];
+        _ ->
+            [<<"STORE">>, Store]
+    end,
+
+    L = 
+    call_key(Key, mbulk([<<"SORT">>, Key | 
+        lists:append([ByPart, LimitPart, GetPart, AscPart, AlphaPart, StorePart])
+    ])),
+    list_to_n_tuple(L, FieldCount).
 
 %%------------------------------------------------------------------------------
 %% persistence commands 
@@ -940,6 +1010,24 @@ do_fun(null, E) ->
     E;
 do_fun(Fun, E) ->
     Fun(E).
+
+%% convert list to n elments tuple list
+list_to_n_tuple([], N) ->
+    [];
+list_to_n_tuple(L, 1) ->
+    L;
+list_to_n_tuple(L, N) when N > 1 ->
+    {1, [], AccL} =
+    lists:foldl(
+        fun
+            (E, {I, AccPart, AccL}) when I < N ->
+                {I+1, [E | AccPart], AccL};
+            (E, {I, AccPart, AccL}) when I =:= N ->
+                {1, [], [list_to_tuple(lists:reverse([E | AccPart])) | AccL]}
+        end,
+    {1, [], []}, L),
+    lists:reverse(AccL).
+
 
 %%
 %% unit test
