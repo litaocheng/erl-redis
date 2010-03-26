@@ -48,6 +48,7 @@ all() ->
     cmd_zset,
     cmd_hash,
     cmd_sort,
+    cmd_trans,
     cmd_persistence,
     test_dummy].
 
@@ -246,7 +247,21 @@ cmd_sort(_Config) ->
 
     ok.
 
-cmd_persistence(Config) -> 
+cmd_trans(_Config) ->
+    ?PF(redis:trans_begin()),
+    ?PF(redis:get("k1")),
+    ?PF(redis:hash_get("myhash", "f2")),
+    ?PF(redis:hash_set("myhash", "f2", "v22")),
+    ?PF(redis:trans_commit()),
+
+    ?PF(redis:trans_begin()),
+    ?PF(redis:get("k1")),
+    ?PF(redis:hash_get("myhash", "f2")),
+    ?PF(redis:hash_set("myhash", "f2", "v22")),
+    ok = ?PF(redis:trans_abort()),
+    ok.
+
+cmd_persistence(_Config) -> 
     ?PF(redis:save()),
     ?PF(redis:bg_save()),
     ?PF(redis:lastsave_time()),

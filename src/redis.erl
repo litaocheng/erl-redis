@@ -97,7 +97,7 @@ ping() ->
     boolean().
 exists(Key) ->
     R = call_key(Key, line(<<"EXISTS">>, Key)),
-    int_bool(R).
+    int_may_bool(R).
 
 %% @doc remove the specified key, return ture if deleted, 
 %% otherwise return false
@@ -106,7 +106,7 @@ exists(Key) ->
     boolean().
 delete(Key) ->
     R = call_key(Key, line(<<"DEL">>, Key)),
-    int_bool(R).
+    int_may_bool(R).
 
 %% @doc remove the specified keys, return the number of
 %% keys removed.
@@ -158,7 +158,7 @@ random_key() ->
 %% NOTE: MUST single mode
 %% O(1)
 -spec rename(OldKey :: key(), NewKey :: key()) -> 
-    'ok' | error_reply().
+    'ok'.
 rename(OldKey, NewKey) ->
     {ok, Client} = redis_manager:get_client_smode(),
     call(Client, line(<<"RENAME">>, OldKey, NewKey)).
@@ -167,7 +167,7 @@ rename(OldKey, NewKey) ->
 %% NOTE: MUST single mode
 %% O(1)
 -spec rename_not_exists(OldKey :: key(), NewKey :: key()) -> 
-    boolean() | error_reply().
+    boolean().
 rename_not_exists(OldKey, NewKey) ->
     {ok, Client} = redis_manager:get_client_smode(),
     R = call(Client, line(<<"RENAMENX">>, OldKey, NewKey)),
@@ -194,7 +194,7 @@ dbsize() ->
     boolean().
 expire(Key, Time) ->
     R = call_key(Key, line(<<"EXPIRE">>, Key, ?N2S(Time))),
-    int_bool(R).
+    int_may_bool(R).
 
 %% @doc set a unix timestamp on the specified key, the Key will
 %% automatically deleted by server at the TimeStamp in the future.
@@ -203,7 +203,7 @@ expire(Key, Time) ->
     boolean().
 expire_at(Key, TimeStamp) ->
     R = call_key(Key, line(<<"EXPIREAT">>, Key, ?N2S(TimeStamp))),
-    int_bool(R).
+    int_may_bool(R).
 
 %% @doc return the remaining time to live in seconds of a key that
 %% has an EXPIRE set
@@ -223,7 +223,7 @@ select(Index) ->
 %% destination DB
 %% NOTE: MUST single mode
 -spec move(Key :: key(), DBIndex :: index()) ->
-    boolean() | error_reply().
+    boolean().
 move(Key, DBIndex) ->
     {ok, Client} = redis_manager:get_client_smode(),
     R = call(Client, line(<<"MOVE">>, Key, ?N2S(DBIndex))),
@@ -256,7 +256,7 @@ flush_all() ->
 
 %% @doc set the string as value of the key
 %% O(1)
--spec set(Key :: key(), Val :: string_value()) ->
+-spec set(Key :: key(), Val :: str()) ->
     'ok'.
 set(Key, Val) ->
     call_key(Key, bulk(<<"SET">>, Key, Val)).
@@ -270,8 +270,8 @@ get(Key) ->
 
 %% @doc atomatic set the value and return the old value
 %% O(1)
--spec getset(Key :: key(), Val :: string_value()) ->
-    null() | binary() | error_reply(). 
+-spec getset(Key :: key(), Val :: str()) ->
+    null() | binary(). 
 getset(Key, Val) ->
     call_key(Key, bulk(<<"GETSET">>, Key, Val)).
 
@@ -307,12 +307,12 @@ multi_get(Keys) ->
     boolean().
 not_exists_set(Key, Val) ->
     R = call_key(Key, bulk(<<"SETNX">>, Key, Val)),
-    int_bool(R).
+    int_may_bool(R).
 
 %% @doc set the respective keys to respective values
 %% NOTE: MUST single mode
 %% O(1)
--spec multi_set(KeyVals :: [{key(), string_value()}]) ->
+-spec multi_set(KeyVals :: [{key(), str()}]) ->
     'ok'.
 multi_set(KeyVals) ->
     {ok, Client} = redis_manager:get_client_smode(),
@@ -323,13 +323,13 @@ multi_set(KeyVals) ->
 %% key-value paires or not none at all are set.
 %% NOTE: MUST single mode
 %% O(1)
--spec multi_set_not_exists(KeyVals :: [{key(), string_value()}]) ->
+-spec multi_set_not_exists(KeyVals :: [{key(), str()}]) ->
     boolean().
 multi_set_not_exists(KeyVals) ->
     {ok, Client} = redis_manager:get_client_smode(),
     L = [<<"MSETNX">> | lists:append([[K, V] || {K, V} <- KeyVals])],
     R = call(Client, mbulk(L)),
-    int_bool(R).
+    int_may_bool(R).
 
 %% @doc increase the integer value of key
 %% O(1)
@@ -469,14 +469,14 @@ list_tail_to_head(SrcKey, DstKey) ->
     boolean().
 set_add(Key, Mem) ->
     R = call_key(Key, bulk(<<"SADD">>, Key, Mem)),
-    int_bool(R).
+    int_may_bool(R).
 
 %% @doc remove the specified member from the set
 -spec set_rm(Key :: key(), Mem :: str()) ->
     boolean().
 set_rm(Key, Mem) ->
     R = call_key(Key, bulk(<<"SREM">>, Key, Mem)),
-    int_bool(R).
+    int_may_bool(R).
 
 %% @doc remove a random member from the set, returning it as return value
 %% O(1)
@@ -493,7 +493,7 @@ set_pop(Key) ->
 set_move(Src, Dst, Mem) ->
     {ok, Client} = redis_manager:get_client_smode(),
     R = call(Client, bulk(<<"SMOVE">>, Src, Dst, Mem)),
-    int_bool(R).
+    int_may_bool(R).
 
 %% @doc return the number of elements in set
 %% O(1)
@@ -508,7 +508,7 @@ set_len(Key) ->
     boolean().
 set_is_member(Key, Mem) ->
     R = call_key(Key, bulk(<<"SISMEMBER">>, Key, Mem)),
-    int_bool(R).
+    int_may_bool(R).
 
 %% @doc return the intersection between the sets
 %% NOTE: MUST single mode
@@ -589,7 +589,7 @@ set_random_member(Key) ->
     boolean().
 zset_add(Key, Mem, Score) ->
     R = call_key(Key, mbulk([<<"ZADD">>, Key, ?N2S(Score), Mem])),
-    int_bool(R).
+    int_may_bool(R).
 
 %% @doc remove the specified member from the sorted set
 %% O(log(N))
@@ -597,7 +597,7 @@ zset_add(Key, Mem, Score) ->
     boolean().
 zset_rm(Key, Mem) ->
     R = call_key(Key, bulk(<<"ZREM">>, Key, Mem)),
-    int_bool(R).
+    int_may_bool(R).
 
 %% @doc If the member already exists increment its score, 
 %% otherwise add the member setting N as score
@@ -722,7 +722,7 @@ zset_inter(_) ->
     boolean().
 hash_set(Key, Field, Val) ->
     R = call_key(Key, mbulk([<<"HSET">>, Key, Field, Val])),
-    int_bool(R).
+    int_may_bool(R).
 
 %% @doc retrieve the value of the specified hash field
 %% O(1)
@@ -737,7 +737,7 @@ hash_get(Key, Field) ->
     boolean().
 hash_del(Key, Field) ->
     R = call_key(Key, bulk(<<"HDEL">>, Key, Field)),
-    int_bool(R).
+    int_may_bool(R).
 
 %% @doc test if the field exists in the hash
 %% O(1)
@@ -745,7 +745,7 @@ hash_del(Key, Field) ->
     boolean().
 hash_exists(Key, Field) ->
     R = call_key(Key, bulk(<<"HEXISTS">>, Key, Field)),
-    int_bool(R).
+    int_may_bool(R).
 
 %% @doc return the number of items in hash
 %% O(1)
@@ -841,6 +841,31 @@ sort(Key, SortOpt) ->
         lists:append([ByPart, LimitPart, GetPart, AscPart, AlphaPart, StorePart])
     ])),
     list_to_n_tuple(L, FieldCount).
+
+%%------------------------------------------------------------------------------
+%% transaction commands 
+%%------------------------------------------------------------------------------
+
+%% @doc transaction begin
+-spec trans_begin() ->
+    'ok'.
+trans_begin() ->
+    {ok, Client} = redis_manager:get_client_smode(),
+    call(Client, line(<<"MULTI">>)).
+
+%% @doc transaction commit
+-spec trans_commit() ->
+    [any()].
+trans_commit() ->
+    {ok, Client} = redis_manager:get_client_smode(),
+    call(Client, line(<<"EXEC">>)).
+
+%% @doc transaction discard
+-spec trans_abort() ->
+    'ok'.
+trans_abort() ->
+    {ok, Client} = redis_manager:get_client_smode(),
+    call(Client, line(<<"DISCARD">>)).
 
 %%------------------------------------------------------------------------------
 %% persistence commands 
@@ -972,9 +997,7 @@ status_return(S) -> S.
 int_return(0) -> false;
 int_return(1) -> true.
 
-int_bool(0) -> false;
-int_bool(1) -> true.
-
+%% convert to boolean if the value is possible, otherwise return the value self
 int_may_bool(0) -> false;
 int_may_bool(1) -> true;
 int_may_bool(V) -> V.

@@ -57,13 +57,14 @@
 -type str() :: binary() | [byte()].
 -type null() :: 'null'.
 -type value() :: null() | str().
+
 -type length() :: non_neg_integer().
 -type index() :: integer().
 -type pattern() :: binary() | [byte()].
 -type passwd() :: [byte()] | binary().
 -type second() :: non_neg_integer().
 -type timestamp() :: non_neg_integer().
--type val_type() :: 'none' | 'string' | 'list' | 'set'.
+-type value_type() :: 'none' | 'string' | 'list' | 'set' | 'hash'.
 -type status_code() :: atom().
 -type error() :: {'error', any()}.
 -type score() :: integer() | float() | [byte()].
@@ -79,9 +80,6 @@
 -type server_type() :: 'undefined' | 'single' | 'dist'.
 -type mode_info() :: {'single', single_server()} | {'dist', dist_server()}.
 
--type string_value() :: binary() | [byte()].
--type value_type() :: 'none' | 'string' | 'list' | 'set'.
--type error_reply() :: any().
--type return() :: 'ok' | 'fail'.
+
 
 -endif. % REDIS_INTERNAL_HRL
