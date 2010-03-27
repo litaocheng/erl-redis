@@ -34,7 +34,7 @@
             {send_timeout, 5000}, {send_timeout_close, true}]).
 
 %% @doc start_link the redis_client server
--spec start_link(Server :: server(), Index :: pos_integer(), 
+-spec start_link(Server :: inet_server(), Index :: pos_integer(), 
     Timeout :: timeout(), Passwd :: passwd()) -> 
     {'ok', any()} | 'ignore' | {'error', any()}.
 start_link({Host, Port} = Server, Index, Timeout, Passwd) ->
@@ -49,7 +49,7 @@ to_regname(Host, Port, Index) ->
     to_regname(Host, Port, Index, false).
 
 %% @doc get the server info
--spec get_server(Client :: pid()) -> server().
+-spec get_server(Client :: pid()) -> inet_server().
 get_server(Client) ->
     gen_server:call(Client, get_server).
 

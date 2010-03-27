@@ -15,22 +15,74 @@
 -behaviour(application).
 -behaviour(supervisor).
 
--export([start/0]).
--export([start_manager/2]).
+-export([start/0, stop/0]).
+-export([single_server/3, single_server/4]).
+-export([dist_server/1, dist_server/2]).
+-export([group_server/4]).
+-export([client/1, client/2]).
+
 -export([start/2, stop/1]).
 -export([init/1]).
 
-%% @doc start the application from the erl shell
+-define(GROUP_DEFAULT, '$default').
+
 -spec start() -> 'ok' | {'error', any()}.
 start() ->
     ?DEBUG2("start the ~p application", [?MODULE]),
     application:start(redis).
 
-%% @doc start the redis server manager
--spec start_manager(Mode :: mode_info(), Passwd :: passwd()) ->
-    'ok' | {'error', any()}.
-start_manager(Mode, Passwd) ->
-    Man = {redis_manager, {redis_manager, start_link, [Mode, Passwd]},
+-spec stop() -> 'ok'.
+stop() ->
+    ?DEBUG2("stop the ~p application", [?MODULE]),
+    application:stop(redis).
+
+-spec single_server(Host :: inet_host(), Port :: inet_port(), Pool :: pos_integer()) ->
+    'ok' | {'error', 'already_started'}.
+single_server(Host, Port, Pool) when Pool >= ?CONN_POOL_MIN,
+                                    Pool =< ?CONN_POOL_MAX ->
+    single_server(Host, Port, Pool, "").
+
+-spec single_server(Host :: inet_host(), Port :: inet_port(), 
+        Pool :: pos_integer(), Passwd :: passwd()) ->
+    'ok' | {'error', 'already_started'}.
+single_server(Host, Port, Pool, Passwd) ->
+    start_manager(?GROUP_DEFAULT, {single, {Host, Port, Pool}}, Passwd).
+
+-spec dist_server(Servers :: [single_server()]) ->
+    'ok' | {'error', 'already_started'}.
+dist_server(Servers) ->
+    dist_server(Servers, "").
+
+-spec dist_server(Servers :: [single_server()], Passwd :: passwd()) ->
+    'ok' | {'error', 'already_started'}.
+dist_server(Servers, Passwd) ->
+    start_manager(?GROUP_DEFAULT, {dist, redis_dist:new(Servers)}, Passwd).
+
+group_server(Group, Type, Server, Pwd) ->
+    Mode = 
+    case Type of
+        single ->
+            {Type, Server};
+        dist ->
+            {Type, redis_dist:new(Server)}
+    end,
+    start_manager(Group, Mode, Pwd).
+
+-spec client(server_type()) -> tuple().
+client(Type) ->
+    redis:new(redis_manager:manager_name(?GROUP_DEFAULT, Type),
+        ?GROUP_DEFAULT,
+        Type).
+
+-spec client(group(), server_type()) -> tuple().
+client(Group, Type) ->
+    redis:new(redis_manager:manager_name(Group, Type),
+        Group, 
+        Type).
+
+%% start the redis server manager
+start_manager(Group, Mode, Passwd) ->
+    Man = {redis_manager, {redis_manager, start_link, [Group, Mode, Passwd]},
                 permanent, 1000, worker, [redis_manager]},
     case supervisor:start_child(?REDIS_SUP, Man) of
         {ok, _Pid} ->
@@ -50,8 +102,6 @@ start(_Type, _Args) ->
 %% @doc the application  stop callback
 stop(_State) ->
     ok.
-
-
 
 %% @doc the main supervisor and connection supervisor callbacks
 init([]) -> 

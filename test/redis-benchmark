@@ -34,6 +34,7 @@ main(Args) ->
     true = erlang:system_info(smp_support),
     redis_app:start(),
     ok = redis:single_server(Config#config.host, Config#config.port, 10, "litao"),
+    %ok = redis:multi_servers([{Config#config.host, 6379, 10}, {Config#config.host, 6380, 10}], "litao"),
 
     [do_bench(F, Config#config.requests, Config#config.clients, Title) ||
         {F, Title} <- action_list()].

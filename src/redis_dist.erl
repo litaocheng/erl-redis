@@ -54,7 +54,7 @@ new(ServerList = [_|_]) ->
 %% @doc partitions the keys into lists, all elements in each list 
 %% assigned to the same server.
 -spec partition_keys(KList :: list(), KFun :: fun() | 'null', Dist :: dist_server()) ->
-    [{server(), [any()]}].
+    [{inet_server(), [any()]}].
 partition_keys(KList, KFun, Dist) ->
     D = 
     lists:foldl(
@@ -74,7 +74,7 @@ partition_keys(KList, KFun, Dist) ->
     
 %% @doc get server from dist by the key
 -spec get_server(Key :: key(), Dist :: dist_server()) -> 
-    {'ok', server()}.
+    {'ok', inet_server()}.
 get_server(Key, Dist) ->
     catch do_get_server(hash_key(Key), Dist).
 

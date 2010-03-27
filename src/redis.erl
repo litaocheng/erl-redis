@@ -3,20 +3,64 @@
 %%% @copyright erl-redis 2010
 %%%
 %%% @author litaocheng@gmail.com
-%%% @doc the interface for redis
+%%% @doc the interface for redis, this module is parametered module,
+%%%     the parameter is the Manager process registered name
 %%% @end
 %%%
 %%%----------------------------------------------------------------------
--module(redis).
+-module(redis, [Manager, Group, SType]).
 -author('ltiaocheng@gmail.com').
 -vsn('0.1').
 -include("redis_internal.hrl").
 
--export([i/0]).
--compile([export_all]).
+-export([i/0, version/0, group/0, server_type/0, server_list/0, db/0]).
+
+%% generic commands
+-export([ping/0, exists/1, delete/1, multi_delete/1, type/1, keys/1,
+        random_key/0, rename/2, rename_not_exists/2, dbsize/0, 
+        expire/2, expire_at/2, ttl/1, select/1, move/2, 
+        flush_db/0, flush_all/0]).
+
+%% string commands
+-export([set/2, get/1, getset/2, multi_get/1, not_exists_set/2, multi_set/1,
+        multi_set_not_exists/1, incr/1, incr/2, decr/1, decr/2]).
+
+%% list commands
+-export([list_push_tail/2, list_push_head/2, list_len/1, list_range/3, 
+        list_trim/3, list_index/2, list_set/3, 
+        list_rm/2, list_rm_from_head/3, list_rm_from_tail/3,
+        list_pop_head/1, list_pop_tail/1, list_tail_to_head/2]).
+
+%% set commands
+-export([set_add/2, set_rm/2, set_pop/1, set_move/3, set_len/1, set_is_member/2,
+        set_inter/1, set_inter_store/2, set_union/1, set_union_store/2,
+        set_diff/2, set_diff_store/3, set_members/1, set_random_member/1]).
+
+%% sorted set commands
+-export([zset_add/3, zset_rm/2, zset_incr/3, zset_index/2, zset_reverse_index/2,
+        zset_range_index/4, zset_range_index_reverse/4, 
+        zset_range_score/4, zset_range_score/6, 
+        zset_rm_by_index/3, zset_rm_by_score/3, zset_len/1, zset_score/2, 
+        zset_union/1, zset_inter/1]).
+
+%% hash commands
+-export([hash_set/3, hash_get/2, hash_del/2, hash_exists/2, hash_len/1, hash_keys/1,
+        hash_vals/1, hash_all/1]).
+
+%% sort commands
+-export([sort/2]).
+
+%% transaction commands
+-export([trans_begin/0, trans_commit/0, trans_abort/0]).
+
+%% persistence commands
+-export([save/0, bg_save/0, lastsave_time/0, bg_rewrite_aof/0]).
+
+%% remote server commands
+-export([info/0]).
+
 -compile(inline).
 -compile({inline_size, 30}).
-
 -import(redis_proto, [line/1, line/2, line/3, line/4, line_list/1,
          bulk/3, bulk/4, mbulk/1]).
 
@@ -35,53 +79,32 @@ i() ->
 version() ->
     {get_app_vsn(), "1.2.5"}.
 
-%% @doc return the server info
--spec servers() -> [single_server()].
-servers() ->
-    redis_manager:server_info().
+%% @doc return the group info
+-spec group() -> atom().
+group() ->
+    redis_manager:group(Manager).
+
+%% @doc return the server list
+-spec server_list() -> [single_server()].
+server_list() ->
+    redis_manager:server_list(Manager).
 
 %% @doc return the server config type
 -spec server_type() -> server_type().
 server_type() ->
-    redis_manager:server_type().
+    redis_manager:server_type(Manager).
 
-%% @doc set single redis server
--spec single_server(Host :: inet_host(), Port :: inet_port()) ->
-    'ok' | {'error', 'already_started'}.
-single_server(Host, Port) ->
-    single_server(Host, Port, ?DEF_POOL).
-
-%% @doc set single redis server, with the connection pool option
--spec single_server(Host :: inet_host(), Port :: inet_port(), Pool :: pos_integer()) ->
-    'ok' | {'error', 'already_started'}.
-single_server(Host, Port, Pool) ->
-    single_server(Host, Port, Pool, "").
-
-%% @doc set single redis server, with the connection pool and passwd options
--spec single_server(Host :: inet_host(), Port :: inet_port(), 
-        Pool :: pos_integer(), Passwd :: passwd()) ->
-    'ok' | {'error', 'already_started'}.
-single_server(Host, Port, Pool, Passwd) ->
-    redis_app:start_manager({single, {Host, Port, Pool}}, Passwd).
-
-%% @doc set the multi servers 
--spec multi_servers(Servers :: [single_server()]) ->
-    'ok' | {'error', 'already_started'}.
-multi_servers(Servers) ->
-    multi_servers(Servers, "").
-
-%% @doc set the multiple servers, with passwd option
--spec multi_servers(Servers :: [single_server()], Passwd :: passwd()) ->
-    'ok' | {'error', 'already_started'}.
-multi_servers(Servers, Passwd) ->
-    redis_app:start_manager({dist, redis_dist:new(Servers)}, Passwd).
+%% @doc return the currently selected db
+-spec db() -> index().
+db() ->
+    0.
 
 %%------------------------------------------------------------------------------
 %% generic commands
 %%------------------------------------------------------------------------------
 
 %% @doc ping the redis server
--spec ping() -> 'ok' | {'error', [server_regname()]}.
+-spec ping() -> 'ok' | {'error', [atom()]}.
 ping() ->
     {_Replies, BadServers} = call_clients_one(line(<<"PING">>)),
     case BadServers of
@@ -114,12 +137,11 @@ delete(Key) ->
 -spec multi_delete(Keys :: [key()]) -> 
     non_neg_integer().
 multi_delete(Keys) ->
-    Type = <<"DEL">>,
-    ClientKeys = redis_manager:partition_keys(Keys),
+    ClientKeys = redis_manager:partition_keys(Manager, Keys),
     ?DEBUG2("client keys is ~p", [ClientKeys]),
     L =
     [begin
-        Cmd = line_list([Type | KLPart]),
+        Cmd = line_list([<<"DEL">> | KLPart]),
         call(Client, Cmd)
     end || {Client, KLPart} <- ClientKeys],
     lists:sum(L).
@@ -132,11 +154,11 @@ type(Key) ->
     call_key(Key, line(<<"TYPE">>, Key)).
 
 %% @doc return the keys list matching a given pattern,
-%% return the {[key()], [server()]}, the second element in tuple is
+%% return the {[key()], [atom()]}, the second element in tuple is
 %% the bad servers.
 %% O(n)
 -spec keys(Pattern :: pattern()) -> 
-    {[key()], [server()]}.
+    {[key()], [atom()]}.
 keys(Pattern) ->
     call_clients_one(line(<<"KEYS">>, Pattern)).
 
@@ -160,7 +182,7 @@ random_key() ->
 -spec rename(OldKey :: key(), NewKey :: key()) -> 
     'ok'.
 rename(OldKey, NewKey) ->
-    {ok, Client} = redis_manager:get_client_smode(),
+    {ok, Client} = redis_manager:get_client_smode(Manager, SType),
     call(Client, line(<<"RENAME">>, OldKey, NewKey)).
 
 %% @doc  rename oldkey into newkey  but fails if the destination key newkey already exists. 
@@ -169,14 +191,14 @@ rename(OldKey, NewKey) ->
 -spec rename_not_exists(OldKey :: key(), NewKey :: key()) -> 
     boolean().
 rename_not_exists(OldKey, NewKey) ->
-    {ok, Client} = redis_manager:get_client_smode(),
+    {ok, Client} = redis_manager:get_client_smode(Manager, SType),
     R = call(Client, line(<<"RENAMENX">>, OldKey, NewKey)),
     int_may_bool(R).
 
 %% @doc return the nubmer of keys in all the currently selected database
 %% O(1)
 -spec dbsize() -> 
-    {integer() , [server()]}.
+    {integer() , [inet_server()]}.
 dbsize() ->
     {Replies, BadServers} = call_clients_one(line(<<"DBSIZE">>)),
     Size = 
@@ -215,7 +237,7 @@ ttl(Key) ->
 %% @doc select the DB with have the specified zero-based numeric index
 %% ??
 -spec select(Index :: index()) ->
-    'ok' | {'error', [server()]}.
+    'ok' | {'error', [inet_server()]}.
 select(Index) ->
     redis_manager:select_db(Index).
 
@@ -225,12 +247,12 @@ select(Index) ->
 -spec move(Key :: key(), DBIndex :: index()) ->
     boolean().
 move(Key, DBIndex) ->
-    {ok, Client} = redis_manager:get_client_smode(),
+    {ok, Client} = redis_manager:get_client_smode(Manager, SType),
     R = call(Client, line(<<"MOVE">>, Key, ?N2S(DBIndex))),
     int_may_bool(R).
 
 %% @doc delete all the keys of the currently selected DB
--spec flush_db() -> 'ok' | {'error', [server_regname()]}.
+-spec flush_db() -> 'ok' | {'error', [atom()]}.
 flush_db() ->
     {_Replies, BadServers} = call_clients_one(line(<<"FLUSHDB">>)),
     case BadServers of
@@ -240,7 +262,7 @@ flush_db() ->
             {error, BadServers}
     end.
             
--spec flush_all() -> 'ok' | {'error', [server_regname()]}.
+-spec flush_all() -> 'ok' | {'error', [atom()]}.
 flush_all() ->
     {_Replies, BadServers} = call_clients_one(line(<<"FLUSHALL">>)),
     case BadServers of
@@ -280,17 +302,16 @@ getset(Key, Val) ->
 -spec multi_get(Keys :: [key()]) ->
     [string() | null()].
 multi_get(Keys) ->
-    Type = <<"MGET">>,
     Len = length(Keys),
     KeyIs = lists:zip(lists:seq(1, Len), Keys),
     KFun = fun({_Index, K}) -> K end,
-    ClientKeys = redis_manager:partition_keys(KeyIs, KFun),
+    ClientKeys = redis_manager:partition_keys(Manager, KeyIs, KFun),
     ?DEBUG2("get client keys partions is ~p", [ClientKeys]),
 
     L =
     [begin
         KsPart = [KFun(KI) || KI <- KIsPart],
-        Cmd = line_list([Type | KsPart]),
+        Cmd = line_list([<<"MGET">> | KsPart]),
 
         Replies = redis_client:send(Client, Cmd),
         lists:zip(KIsPart, Replies)
@@ -315,7 +336,7 @@ not_exists_set(Key, Val) ->
 -spec multi_set(KeyVals :: [{key(), str()}]) ->
     'ok'.
 multi_set(KeyVals) ->
-    {ok, Client} = redis_manager:get_client_smode(),
+    {ok, Client} = redis_manager:get_client_smode(Manager, SType),
     L = [<<"MSET">> | lists:append([[K, V] || {K, V} <- KeyVals])],
     call(Client, mbulk(L)).
 
@@ -326,7 +347,7 @@ multi_set(KeyVals) ->
 -spec multi_set_not_exists(KeyVals :: [{key(), str()}]) ->
     boolean().
 multi_set_not_exists(KeyVals) ->
-    {ok, Client} = redis_manager:get_client_smode(),
+    {ok, Client} = redis_manager:get_client_smode(Manager, SType),
     L = [<<"MSETNX">> | lists:append([[K, V] || {K, V} <- KeyVals])],
     R = call(Client, mbulk(L)),
     int_may_bool(R).
@@ -424,17 +445,17 @@ list_rm(Key, Val) ->
 %% @doc remove the first N occurrences of the value from head to
 %% tail in the list
 %% O(n)
--spec list_rm_head(Key :: key(), N :: pos_integer(), Val :: str()) ->
+-spec list_rm_from_head(Key :: key(), N :: pos_integer(), Val :: str()) ->
     integer().
-list_rm_head(Key, N, Val) ->
+list_rm_from_head(Key, N, Val) ->
     call_key(Key, bulk(<<"LREM">>, Key, ?N2S(N), Val)).
 
 %% @doc remove the first N occurrences of the value from tail to
 %% head in the list
 %% O(n)
--spec list_rm_tail(Key :: key(), N :: pos_integer(), Val :: str()) ->
+-spec list_rm_from_tail(Key :: key(), N :: pos_integer(), Val :: str()) ->
     integer().
-list_rm_tail(Key, N, Val) ->
+list_rm_from_tail(Key, N, Val) ->
     call_key(Key, bulk(<<"LREM">>, Key, ?N2S(-N), Val)).
 
 %% @doc atomically return and remove the first element of the list
@@ -455,8 +476,10 @@ list_pop_tail(Key) ->
 %% the element into the DstKey list
 %% NOTE: MUST single mode
 %% O(1)
+-spec list_tail_to_head(SrcKey :: key(), DstKey :: key()) ->
+    'ok'.
 list_tail_to_head(SrcKey, DstKey) ->
-    {ok, Client} = redis_manager:get_client_smode(),
+    {ok, Client} = redis_manager:get_client_smode(Manager, SType),
     call(Client, line(<<"RPOPLPUSH">>, SrcKey, DstKey)).
 
 %%------------------------------------------------------------------------------
@@ -491,7 +514,7 @@ set_pop(Key) ->
 -spec set_move(Src :: key(), Dst :: key(), Mem :: str()) ->
     boolean().
 set_move(Src, Dst, Mem) ->
-    {ok, Client} = redis_manager:get_client_smode(),
+    {ok, Client} = redis_manager:get_client_smode(Manager, SType),
     R = call(Client, bulk(<<"SMOVE">>, Src, Dst, Mem)),
     int_may_bool(R).
 
@@ -516,7 +539,7 @@ set_is_member(Key, Mem) ->
 -spec set_inter(Keys :: [key()]) ->
     [value()].
 set_inter(Keys) ->
-    {ok, Client} = redis_manager:get_client_smode(),
+    {ok, Client} = redis_manager:get_client_smode(Manager, SType),
     call(Client, line_list([<<"SINTER">> | Keys])).
 
 %% @doc compute the intersection between the sets and save the 
@@ -524,7 +547,7 @@ set_inter(Keys) ->
 -spec set_inter_store(Dst :: key(), Keys :: [key()]) ->
     'ok' | error().
 set_inter_store(Dst, Keys) ->
-    {ok, Client} = redis_manager:get_client_smode(),
+    {ok, Client} = redis_manager:get_client_smode(Manager, SType),
     call(Client, line_list([<<"SINTERSTORE">>, Dst | Keys])).
 
 %% @doc  return the union of all the sets
@@ -533,7 +556,7 @@ set_inter_store(Dst, Keys) ->
 -spec set_union(Keys :: [key()]) ->
     [value()].
 set_union(Keys) ->
-    {ok, Client} = redis_manager:get_client_smode(),
+    {ok, Client} = redis_manager:get_client_smode(Manager, SType),
     call(Client, line_list([<<"SUNION">> | Keys])).
 
 %% @doc compute the union between the sets and save the 
@@ -543,7 +566,7 @@ set_union(Keys) ->
 -spec set_union_store(Dst :: key(), Keys :: [key()]) ->
     'ok' | error().
 set_union_store(Dst, Keys) ->
-    {ok, Client} = redis_manager:get_client_smode(),
+    {ok, Client} = redis_manager:get_client_smode(Manager, SType),
     call(Client, line_list([<<"SUNIONSTORE">>, Dst | Keys])).
 
 %% @doc return the difference between the First set and all the other sets
@@ -552,7 +575,7 @@ set_union_store(Dst, Keys) ->
 -spec set_diff(First :: key(), Keys :: [key()]) ->
     [value()].
 set_diff(First, Keys) ->
-    {ok, Client} = redis_manager:get_client_smode(),
+    {ok, Client} = redis_manager:get_client_smode(Manager, SType),
     call(Client, line_list([<<"SDIFF">>, First | Keys])).
 
 %% @doc compute the difference between the sets and save the 
@@ -562,7 +585,7 @@ set_diff(First, Keys) ->
 -spec set_diff_store(Dst :: key(), First :: key(), Keys :: [key()]) ->
     'ok' | error().
 set_diff_store(Dst, First, Keys) ->
-    {ok, Client} = redis_manager:get_client_smode(),
+    {ok, Client} = redis_manager:get_client_smode(Manager, SType),
     call(Client, line_list([<<"SDIFFSTORE">>, Dst, First | Keys])).  
 
 %% @doc return all the members in the set
@@ -850,21 +873,21 @@ sort(Key, SortOpt) ->
 -spec trans_begin() ->
     'ok'.
 trans_begin() ->
-    {ok, Client} = redis_manager:get_client_smode(),
+    {ok, Client} = redis_manager:get_client_smode(Manager, SType),
     call(Client, line(<<"MULTI">>)).
 
 %% @doc transaction commit
 -spec trans_commit() ->
     [any()].
 trans_commit() ->
-    {ok, Client} = redis_manager:get_client_smode(),
+    {ok, Client} = redis_manager:get_client_smode(Manager, SType),
     call(Client, line(<<"EXEC">>)).
 
 %% @doc transaction discard
 -spec trans_abort() ->
     'ok'.
 trans_abort() ->
-    {ok, Client} = redis_manager:get_client_smode(),
+    {ok, Client} = redis_manager:get_client_smode(Manager, SType),
     call(Client, line(<<"DISCARD">>)).
 
 %%------------------------------------------------------------------------------
@@ -894,7 +917,7 @@ bg_save() ->
     end.
 
 %% @doc return the UNIX time that the last DB save excuted with success
--spec lastsave_time() -> [{server_regname(), timestamp()}].
+-spec lastsave_time() -> [{atom(), timestamp()}].
 lastsave_time() ->
     {Replies, _BadServers} = call_clients_one(line(<<"LASTSAVE">>)),
     Replies.
@@ -914,7 +937,7 @@ bg_rewrite_aof() ->
 %% remote server control commands 
 %%------------------------------------------------------------------------------
 %% @doc return the info about the server
--spec info() -> [{server_regname(), value()}].
+-spec info() -> [{atom(), value()}].
 info() ->
     {Replies, _BadServers} = call_clients_one(line(<<"INFO">>)),
     Replies.
@@ -931,24 +954,24 @@ call(Client, Cmd) ->
 
 %% do the call to the server the key belong to
 call_key(Key, Cmd) ->
-    {ok, Client} = redis_manager:get_client(Key),
+    {ok, Client} = redis_manager:get_client(Manager, Key),
     redis_client:send(Client, Cmd).
 
 %% do the call to one connection with all servers 
 call_clients_one(Cmd) ->
-    {ok, Clients} = redis_manager:get_clients_one(),
+    {ok, Clients} = redis_manager:get_clients_one(Manager),
     ?DEBUG2("call clients one : ~p~ncmd :~p", [Clients, Cmd]),
     redis_client:multi_send(Clients, Cmd).
 
 %% do the call to all the connections with all servers
 call_clients_all(Cmd) ->
-    {ok, Clients} = redis_manager:get_clients_all(),
+    {ok, Clients} = redis_manager:get_clients_all(Manager),
     ?DEBUG2("call clients all :~p~ncmd :~p", [Clients, Cmd]),
     redis_client:multi_send(Clients, Cmd).
 
 %% do the call to any one server
 call_any(Cmd, F) ->
-    {ok, Clients} = redis_manager:get_clients_one(),
+    {ok, Clients} = redis_manager:get_clients_one(Manager),
     ?DEBUG2("call any send cmd ~p by clients:~p", [Cmd, Clients]),
     [V | _] =
     [begin
@@ -963,13 +986,13 @@ call_any(Cmd, F) ->
     V.
 
 %% get sorted set range by index
-do_zset_range_index(Type, Key, Start, End, WithScore) ->
+do_zset_range_index(Cmd, Key, Start, End, WithScore) ->
     case WithScore of
         true ->
-            L = call_key(Key, line_list([Type, Key, ?N2S(Start), ?N2S(End), <<"WITHSCORES">>])),
+            L = call_key(Key, line_list([Cmd, Key, ?N2S(Start), ?N2S(End), <<"WITHSCORES">>])),
             list_to_kv_tuple(L, fun(S) -> string_to_score(S) end);
         false ->
-            call_key(Key, line(Type, Key, ?N2S(Start), ?N2S(End)))
+            call_key(Key, line(Cmd, Key, ?N2S(Start), ?N2S(End)))
     end.
 
 %% convert score to string
@@ -988,14 +1011,6 @@ string_to_score(S) when is_list(S) ->
         N ->
             N
     end.
-
-%% convert status code to return
-status_return(<<"OK">>) -> ok;
-status_return(S) -> S.
-
-%% convert integer to return
-int_return(0) -> false;
-int_return(1) -> true.
 
 %% convert to boolean if the value is possible, otherwise return the value self
 int_may_bool(0) -> false;
@@ -1035,7 +1050,7 @@ do_fun(Fun, E) ->
     Fun(E).
 
 %% convert list to n elments tuple list
-list_to_n_tuple([], N) ->
+list_to_n_tuple([], _N) ->
     [];
 list_to_n_tuple(L, 1) ->
     L;
@@ -1050,7 +1065,6 @@ list_to_n_tuple(L, N) when N > 1 ->
         end,
     {1, [], []}, L),
     lists:reverse(AccL).
-
 
 %%
 %% unit test

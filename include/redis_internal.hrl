@@ -40,11 +40,13 @@
 
 %% the redis supervisor name
 -define(REDIS_SUP, redis_sup).
--define(REDIS_MANAGER_SINGLE, redis_manager_single).
--define(REDIS_MANAGER_DIST, redis_manager_dist).
+-define(MANAGER_BASE, "redis_manager").
 -define(CONN_SUP, redis_conn_sup).
 -define(CONN_TIMEOUT, 1000).
 -define(RECV_TIMEOUT, 1000).  
+-define(CONN_POOL_MIN, 1).
+-define(CONN_POOL_MAX, 32).
+
 %% 
 %% about types and records
 %%
@@ -71,15 +73,13 @@
 
 -type inet_host() :: atom() | string() | binary().
 -type inet_port() :: 0..65535.
+-type inet_server() :: {inet_host(), inet_port()}.
 
--type server_regname() :: atom().
--type server() :: {inet_host(), inet_port()}.
+-type group() :: atom().
 -type single_server() :: {inet_host(), inet_port(), pos_integer()}.
 -type dist_server() :: #dist_server{}.
 -type server_info() ::  single_server() | dist_server().
 -type server_type() :: 'undefined' | 'single' | 'dist'.
 -type mode_info() :: {'single', single_server()} | {'dist', dist_server()}.
-
-
 
 -endif. % REDIS_INTERNAL_HRL
