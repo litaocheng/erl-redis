@@ -33,11 +33,12 @@ main(Args) ->
     code:add_path("../ebin"),
     true = erlang:system_info(smp_support),
     redis_app:start(),
-    ok = redis:single_server(Config#config.host, Config#config.port, 10, "litao"),
+    ok = redis_app:single_server(Config#config.host, Config#config.port, 10, "litao"),
     %ok = redis:multi_servers([{Config#config.host, 6379, 10}, {Config#config.host, 6380, 10}], "litao"),
 
+    Redis = redis_app:client(single),
     [do_bench(F, Config#config.requests, Config#config.clients, Title) ||
-        {F, Title} <- action_list()].
+        {F, Title} <- action_list(Redis)].
 
 do_bench(F, N, Conc, Title) ->
     NP = N div Conc,
@@ -82,13 +83,13 @@ do_times(F, N) ->
 -define(F(Expr),
     (fun() -> Expr end)).
 
-action_list() ->
-    [{?F(redis:ping()), "PING"},
-     {fun(N) -> redis:set("foo_rand000000000000", N) end, "SET"},
-     {?F(redis:get("foo_rand000000000000")), "GET"},
-     {?F(redis:incr("counter_rand000000000000")), "INCR"},
-     {?F(redis:list_push_head("mylist", <<"bar">>)), "LPUSH"},
-     {?F(redis:list_pop_head("mylist")), "LPOP"}
+action_list(Redis) ->
+    [{?F(Redis:ping()), "PING"},
+     {fun(N) -> Redis:set("foo_rand000000000000", N) end, "SET"},
+     {?F(Redis:get("foo_rand000000000000")), "GET"},
+     {?F(Redis:incr("counter_rand000000000000")), "INCR"},
+     {?F(Redis:list_push_head("mylist", <<"bar">>)), "LPUSH"},
+     {?F(Redis:list_pop_head("mylist")), "LPOP"}
     ].
 
 parse_args(Args) ->

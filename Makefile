@@ -8,7 +8,7 @@ ERL_LIB := $(shell erl -noshell -eval 'io:format("~s",[code:lib_dir()]),erlang:h
 		2> /dev/null)
 APP_FULLNAME := $(APP_NAME)-$(APP_VSN)
 
-all: test_compile
+all: compile
 
 compile:
 	(mkdir -p ./ebin)
@@ -19,7 +19,8 @@ test_compile:
 	@#(cd src;$(MAKE) TEST=true NOLOG=true)
 	(cd src;$(MAKE) TEST=true)
 
-test: unit_test comm_test
+test: clean unit_test comm_test 
+	(make clean)
 
 unit_test: test_compile 
 	(erl -pa ./ebin -eval "eunit:test(\"./ebin\", []), init:stop()")
@@ -46,6 +47,7 @@ tags :
 clean:
 	(rm -rf ./ebin/*; rm -rf ./edoc/*)
 	(rm -rf ./test/log)
+	(rm -rf ./test/*.beam)
 	(cd src;$(MAKE) clean)
 
 dist: clean

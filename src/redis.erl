@@ -964,10 +964,10 @@ call_clients_one(Cmd) ->
     redis_client:multi_send(Clients, Cmd).
 
 %% do the call to all the connections with all servers
-call_clients_all(Cmd) ->
-    {ok, Clients} = redis_manager:get_clients_all(Manager),
-    ?DEBUG2("call clients all :~p~ncmd :~p", [Clients, Cmd]),
-    redis_client:multi_send(Clients, Cmd).
+%call_clients_all(Cmd) ->
+%    {ok, Clients} = redis_manager:get_clients_all(Manager),
+%    ?DEBUG2("call clients all :~p~ncmd :~p", [Clients, Cmd]),
+%    redis_client:multi_send(Clients, Cmd).
 
 %% do the call to any one server
 call_any(Cmd, F) ->
