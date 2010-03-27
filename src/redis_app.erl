@@ -70,19 +70,20 @@ group_server(Group, Type, Server, Pwd) ->
 
 -spec client(server_type()) -> tuple().
 client(Type) ->
-    redis:new(redis_manager:manager_name(?GROUP_DEFAULT, Type),
+    redis:new(manager_name(?GROUP_DEFAULT, Type),
         ?GROUP_DEFAULT,
         Type).
 
 -spec client(group(), server_type()) -> tuple().
 client(Group, Type) ->
-    redis:new(redis_manager:manager_name(Group, Type),
+    redis:new(manager_name(Group, Type),
         Group, 
         Type).
 
 %% start the redis server manager
-start_manager(Group, Mode, Passwd) ->
-    Man = {redis_manager, {redis_manager, start_link, [Group, Mode, Passwd]},
+start_manager(Group, {Type, _} = Mode, Passwd) ->
+    Name = manager_name(Group, Type),
+    Man = {Name, {redis_manager, start_link, [Name, Mode, Passwd]},
                 permanent, 1000, worker, [redis_manager]},
     case supervisor:start_child(?REDIS_SUP, Man) of
         {ok, _Pid} ->
@@ -117,3 +118,5 @@ init([]) ->
 %% internal API
 %%
 
+manager_name(Group, Type) when is_atom(Group) ->
+    list_to_atom(lists:concat([?MANAGER_BASE, '_', Group, '_', Type])).

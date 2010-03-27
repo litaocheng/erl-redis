@@ -39,7 +39,7 @@
     {'ok', any()} | 'ignore' | {'error', any()}.
 start_link({Host, Port} = Server, Index, Timeout, Passwd) ->
     Name = to_regname(Host, Port, Index, true),
-    ?DEBUG2("start_link redis_client ~p", [Name]),
+    ?DEBUG2("start_link redis_client *~p*", [Name]),
     gen_server:start_link({local, Name}, ?MODULE, {Server, Index, Timeout, Passwd}, []).
 
 %% @doc convert server struct to registered process name

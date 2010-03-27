@@ -15,7 +15,6 @@
 
 
 -export([start/3, start_link/3]).
--export([group_name/1, manager_name/2]).
 -export([select_db/1]).
 -export([server_list/1, server_type/1]).
 -export([get_client_smode/2, get_client/2, get_clients_one/1, get_clients_all/1]).
@@ -24,7 +23,7 @@
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
                             terminate/2, code_change/3]).
 
--compile({inline, [manager_name/2, get_client/2]}).
+-compile({inline, [get_client/2]}).
 
 -record(state, {
         type = undefined :: server_type(),  % the servers type
@@ -35,30 +34,18 @@
     }).
 
 %% @doc start the redis_sysdata server
--spec start(group(), mode_info(), passwd()) ->
+-spec start(atom(), mode_info(), passwd()) ->
     {'ok', any()} | 'ignore' | {'error', any()}.
-start(Group, {T, _} = Mode, Passwd) ->
-    Name = manager_name(Group, T),
+start(Name, Mode, Passwd) ->
     ?DEBUG2("start ~p mode: ~p passwd :~p", [Name, Mode, Passwd]),
     gen_server:start({local, Name}, ?MODULE, [Mode, Passwd], []).
 
 %% @doc start_link the redis_sysdata server
--spec start_link(group(), mode_info(), passwd()) ->
+-spec start_link(atom(), mode_info(), passwd()) ->
     {'ok', any()} | 'ignore' | {'error', any()}.
-start_link(Group, {T, _} = Mode, Passwd) ->
-    Name = manager_name(Group, T),
-    ?DEBUG2("start_link ~p mode: ~p passwd :~p", [Name, Mode, Passwd]),
+start_link(Name, Mode, Passwd) ->
+    ?DEBUG2("start_link *~p* mode: ~p passwd :~p", [Name, Mode, Passwd]),
     gen_server:start_link({local, Name}, ?MODULE, [Mode, Passwd], []).
-
--spec group_name(atom()) -> group().
-group_name(Manager) when is_atom(Manager) ->
-    ?MANAGER_BASE ++ Group  = atom_to_list(Manager),
-    list_to_existing_atom(Group).
-
--spec manager_name(group(), server_type()) -> atom().
-manager_name(Group, Type) when is_atom(Group) ->
-    list_to_atom(lists:concat([?MANAGER_BASE, '_', Group, '_', Type])).
-
 
 %% @doc select db
 select_db(_Index) ->
