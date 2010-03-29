@@ -77,7 +77,7 @@ i() ->
 %% second element is the lowest redis server version supported
 -spec version() -> {string(), string()}.
 version() ->
-    {get_app_vsn(), "1.2.5"}.
+    {get_app_vsn(), "1.2.6"}.
 
 %% @doc return the group info
 -spec group() -> atom().
@@ -1020,9 +1020,14 @@ int_may_bool(V) -> V.
 %% get the application vsn
 %% return 'undefined' | string().
 get_app_vsn() ->
-    {ok, App} = application:get_application(),
-    {ok, Vsn} = application:get_key(App, vsn),
-    Vsn.
+    case application:get_application() of
+        undefined ->
+            "0.3";
+        _ ->
+            {ok, App} = application:get_application(),
+            {ok, Vsn} = application:get_key(App, vsn),
+            Vsn
+    end.
 
 %% convert list like [f1, v1, f2, v2] to the key-value tuple
 %% [{f1, v1}, {f2, v2}].

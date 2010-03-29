@@ -5,7 +5,15 @@ you can get much more information about redis at http://github.com/antirez/redis
 ## Install
 At first, you must install and start the redis server.
 
+Then let us do some tests, you must start three redis-server bind 6379, 6380, 16379 in 
+localhost for test usage. after above, we can do the test:
     $ make test
+
+if some test cases not passed, you need to do some toubleshooting: update your redis-server 
+to new version or disable some redis commands.
+
+if all the test case passed, now you can install the redis client:
+
     $ make
     $ make install
 

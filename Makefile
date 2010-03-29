@@ -20,7 +20,7 @@ test_compile:
 	(cd src;$(MAKE) TEST=true)
 
 test: clean unit_test comm_test 
-	(make clean)
+	@#(make clean)
 
 unit_test: test_compile 
 	(erl -pa ./ebin -eval "eunit:test(\"./ebin\", []), init:stop()")
