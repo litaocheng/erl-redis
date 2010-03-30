@@ -73,11 +73,9 @@ i() ->
     ok.
 
 %% @doc return the redis version info
-%% first element is the redis client version,
-%% second element is the lowest redis server version supported
--spec version() -> {string(), string()}.
+-spec version() -> string().
 version() ->
-    {get_app_vsn(), "1.2.6"}.
+    get_app_vsn().
 
 %% @doc return the group info
 -spec group() -> atom().
@@ -1022,7 +1020,7 @@ int_may_bool(V) -> V.
 get_app_vsn() ->
     case application:get_application() of
         undefined ->
-            "0.3";
+            "0.2.6";
         _ ->
             {ok, App} = application:get_application(),
             {ok, Vsn} = application:get_key(App, vsn),

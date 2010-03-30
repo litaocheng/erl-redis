@@ -59,5 +59,9 @@ group:
     RedisCache:exists("key"),
     RedisUser:exists("key").
     
-
 you can find more usage info in the test/redis_SUITE.erl module
+
+## Version
+the erl-redis version is synchronous with redis server version. 
+Subtracting one from the Redis server major version will get the erl-redis version.
+e.g. if you want to request the Redis 1.2.6, you need the erl-redis with version 0.2.6
