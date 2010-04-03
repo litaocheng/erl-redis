@@ -16,8 +16,8 @@
 
 do(Config) -> 
     Redis = ?config(redis_client, Config),
-    {CV, SV} = Redis:version(),
-    io:format("client version ~p for server version:~p~n", [CV, SV]),
+    Version = Redis:version(),
+    io:format("client version ~p~n", [Version]),
     test_generic(Config),
     test_string(Config),
     test_list(Config),

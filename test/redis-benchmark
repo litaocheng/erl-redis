@@ -33,8 +33,8 @@ main(Args) ->
     code:add_path("../ebin"),
     true = erlang:system_info(smp_support),
     redis_app:start(),
-    ok = redis_app:single_server(Config#config.host, Config#config.port, 10, "litao"),
-    %ok = redis:multi_servers([{Config#config.host, 6379, 10}, {Config#config.host, 6380, 10}], "litao"),
+    ok = redis_app:single_server(Config#config.host, Config#config.port, 2, "litao"),
+    %ok = redis:multi_servers([{Config#config.host, 6379, 1}, {Config#config.host, 6380, 1}], "litao"),
 
     Redis = redis_app:client(single),
     [do_bench(F, Config#config.requests, Config#config.clients, Title) ||
