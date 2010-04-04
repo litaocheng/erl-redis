@@ -19,16 +19,20 @@ do(Config) ->
     Version = Redis:version(),
     io:format("client version ~p~n", [Version]),
     test_generic(Config),
-    test_string(Config),
-    test_list(Config),
-    test_set(Config),
-    test_zset(Config),
+    %test_string(Config),
+    %test_list(Config),
+    %test_set(Config),
+    %test_zset(Config),
+
     % Redis 1.3.4
     %test_hash(Config),
-    test_sort(Config),
+
+    %test_sort(Config),
+
     % Redis 1.3.4
     %test_trans(Config),
-    test_persistence(Config),
+
+    %test_persistence(Config),
     ok.
 
 

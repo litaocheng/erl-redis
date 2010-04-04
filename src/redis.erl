@@ -159,6 +159,8 @@ type(Key) ->
     {[key()], [atom()]}.
 keys(Pattern) ->
     call_clients_one(line(<<"KEYS">>, Pattern)).
+    %redis_proto:tokens(Bin, $\s).
+
 
 %% @doc return a randomly selected key from the currently selected DB
 %% O(1)

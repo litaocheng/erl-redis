@@ -14,12 +14,12 @@
 
 -export([line/1, line/2, line/3, line/4, line_list/1,
          bulk/3, bulk/4, mbulk/1]).
--export([parse_reply/2]).
+-export([parse_reply/1]).
 -export([tokens/2]).
 
 -compile([opt_bin_info]).
 -compile({inline, [line/1, line/2, line/3, line/4, line_list/1,
-         bulk/3, bulk/4, mbulk/1, parse_reply/2]}).  
+         bulk/3, bulk/4, mbulk/1, parse_reply/1]}).  
 
 %% @doc generate the line 
 -spec line(iolist()) -> iolist().
@@ -75,56 +75,29 @@ mbulk(L) ->
     ["*", ?N2S(N), ?CRLF | Lines].
 
 %% @doc parse the reply
--spec parse_reply(Bin :: binary(), any()) ->
+-spec parse_reply(Bin :: binary()) ->
     any().
-parse_reply(<<"+", Rest/binary>>, init) ->
+parse_reply(<<"+", Rest/binary>>) ->
     parse_status_reply(Rest);
-parse_reply(<<"-", Rest/binary>>, init) ->
+parse_reply(<<"-", Rest/binary>>) ->
     parse_error_reply(Rest);
-parse_reply(<<":", Rest/binary>>, init) ->
+parse_reply(<<":", Rest/binary>>) ->
     b2n(Rest);
 
-parse_reply(<<"$-1\r\n">>, init) ->
+parse_reply(<<"$-1\r\n">>) ->
     null;
-parse_reply(<<"$0\r\n">>, init) ->
+parse_reply(<<"$0\r\n">>) ->
     <<>>;
-parse_reply(<<"$", Rest/binary>>, init) ->
+parse_reply(<<"$", Rest/binary>>) ->
     N = b2n(Rest),
     {bulk_more, N};
-parse_reply(Bin, {bulk_more, N}) ->
-    <<Val:N/bytes, "\r\n">> = Bin,
-    Val;
-
-parse_reply(<<"*-1\r\n">>, init) ->
+parse_reply(<<"*-1\r\n">>) ->
     null;
-parse_reply(<<"*0\r\n">>, init) ->
+parse_reply(<<"*0\r\n">>) ->
     null;
-parse_reply(<<"*", Rest/binary>>, init) ->
+parse_reply(<<"*", Rest/binary>>) ->
     N = b2n(Rest),
-    {mbulk_more, N, [], next};
-parse_reply(Bin, {mbulk_more, N, Acc, Bulk = {bulk_more, _}}) ->
-    Item = parse_reply(Bin, Bulk),
-    ?DEBUG2("parse_reply n:~p item:~p", [N, Item]),
-    case N of
-        1 ->
-            lists:reverse([Item | Acc]);
-        _ ->
-            {mbulk_more, N-1, [Item | Acc], next}
-    end;
-parse_reply(Bin, {mbulk_more, N, Acc, next}) ->
-    Bulk = parse_reply(Bin, init),
-    ?DEBUG2("parse_reply n:~p bulk:~p", [N, Bulk]),
-    case Bulk of
-        null ->
-            case N of
-                1 ->
-                    lists:reverse([null | Acc]);
-                _ ->
-                    {mbulk_more, N-1, [null | Acc], next}
-            end;
-        _ ->
-            {mbulk_more, N, Acc, Bulk}
-    end.
+    {mbulk_more, N}.
 
 %% @doc return a list of tokens in string, separated by the characters
 %%  in Separatorlist
@@ -214,9 +187,6 @@ b2n_test_() ->
         ?_assertEqual(12432, b2n(<<"12432\r\n">>))     
     ].
 
-parse_reply(Bin) ->
-    parse_reply(Bin, init).
-
 parse_test() ->
     ?assertEqual(ok, parse_reply(<<"+OK\r\n">>)),
     ?assertEqual(queued, parse_reply(<<"+QUEUED\r\n">>)),
@@ -236,24 +206,12 @@ parse_test() ->
     ?assertEqual(<<>>, parse_reply(<<"$0\r\n">>)),
     ?assertEqual({bulk_more, 1}, parse_reply(<<"$1\r\n">>)),
     ?assertEqual({bulk_more, 10}, parse_reply(<<"$10\r\n">>)),
-    ?assertEqual(<<"0123456789">>, parse_reply(<<"0123456789\r\n">>, {bulk_more, 10})),
-    ?assertError({badmatch, _}, parse_reply(<<"0123456789">>, {bulk_more, 10})),
 
-    MB1 = {mbulk_more, 2, [], next},
-    MB21 = {mbulk_more, 2, [], {bulk_more, 5}},
-    MB22 = {mbulk_more, 1, [<<"hello">>], next},
-    MB31 = {mbulk_more, 1, [<<"hello">>], {bulk_more, 3}},
-    MB32 = [<<"hello">>, <<"bob">>],
     ?assertEqual(null, parse_reply(<<"*-1\r\n">>)),
     ?assertEqual(null, parse_reply(<<"*0\r\n">>)),
-    ?assertEqual(MB1, parse_reply(<<"*2\r\n">>)),
-    ?assertEqual(MB21, parse_reply(<<"$5\r\n">>, MB1)),
-    ?assertEqual(MB22, parse_reply(<<"hello\r\n">>, MB21)),
-    ?assertEqual(MB31, parse_reply(<<"$3\r\n">>, MB22)),
-    ?assertEqual(MB32, parse_reply(<<"bob\r\n">>,MB31)), 
+    ?assertEqual({mbulk_more, 2}, parse_reply(<<"*2\r\n">>)),
 
-    ?assertEqual({mbulk_more, 1, [], next}, parse_reply(<<"*1\r\n">>)),
-    ?assertEqual([null], parse_reply(<<"$-1\r\n">>, {mbulk_more, 1, [], next})),
+    ?assertEqual({mbulk_more, 1}, parse_reply(<<"*1\r\n">>)),
 
     ok.
 

@@ -13,7 +13,7 @@ init_per_suite(Config) ->
     crypto:start(),
     code:add_path("../ebin"),
     redis_app:start(),
-    ok = redis_app:single_server(localhost, 6379, 1, "litao"),
+    ok = redis_app:single_server(localhost, 6379, 1),
     Redis = redis_app:client(single),
     %ok = Redis:flush_all(),
     io:format("Redis is ~p~n", [Redis]),

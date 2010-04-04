@@ -27,7 +27,7 @@
         db = 0              % the default db index
     }).
 
--define(TCP_OPTS, [inet, binary, {active, true}, 
+-define(TCP_OPTS, [inet, binary, {active, once}, 
             {packet, line}, {nodelay, true},
             {recbuf, 102400},
             {sndbuf, 102400},
@@ -97,13 +97,11 @@ init({Server = {Host, Port}, Index, Timeout, Passwd}) ->
 
 handle_call({command, Data}, _From, State = #state{sock = Sock, server = Server}) ->
     ?DEBUG2("redis client send data:~n~p~n\t=> ~p", [Data, Server]),
-    case do_send_recv(Data, Sock, Server) of
-        {tcp_error, Reason} ->
-            {stop, Reason, {tcp_error, Reason}, State};
-        Reply ->
-            ?DEBUG2("reply the return ~p", [Reply]),
-            {reply, Reply, State}
-    end;
+    ?DEBUG2(">>>inet options ~p>>>>", [inet:getopts(Sock, [packet, active])]),
+    Reply = do_send_recv(Data, Sock, Server),
+    ?DEBUG2("<<<inet options ~p<<<<", [inet:getopts(Sock, [packet, active])]),
+    ?DEBUG2("reply the return ~p", [Reply]),
+    {reply, Reply, State};
 handle_call(get_server, _From, State = #state{server = Server}) ->
     {reply, Server, State};
 handle_call(get_sock, _From, State = #state{sock = Sock}) ->
@@ -150,22 +148,30 @@ to_regname(Host, Port, Index, First) ->
 do_send_recv(Data, Sock, Server) ->
     case gen_tcp:send(Sock, Data) of
         ok -> % receive response
-            do_recv_loop(Sock, init, Server);
+            do_recv(Sock, Server, null);
         {error, Reason} ->
             ?ERROR2("send message to ~p error:~p", [Server, Reason]),
             exit({error, Reason})
     end.
 
-do_recv_loop(Sock, State, Server) ->
+do_recv(Sock, Server, State) ->
     receive 
         {tcp, Sock, Packet} ->
             ?DEBUG2("receive packet :~p", [Packet]),
-            case redis_proto:parse_reply(Packet, State) of
-                {bulk_more, _} = State2 ->
-                    do_recv_loop(Sock, State2, Server);
-                {mbulk_more, _, _, _} = State2 ->
-                    do_recv_loop(Sock, State2, Server);
-                Val ->
+            case redis_proto:parse_reply(Packet) of
+                {bulk_more, N} -> % bulk reply
+                    Bulk = recv_bulk_data(Sock, N),
+                    ok = inet:setopts(Sock, [{active, once}]),
+                    Bulk;
+                {mbulk_more, MB} when State =:= null -> % multi bulk replies
+                    ok = inet:setopts(Sock, [{active, once}]),
+                    Bulks = recv_bulks(Sock, Server, MB);
+                Val -> % integer, status or error
+                    ?DEBUG2("parse value is ~p", [Val]),
+                    ?DEBUG2("message queue:~p", [process_info(self(), message_queue_len)]),
+                    ?DEBUG2("inet options ~p", [inet:getopts(Sock, [packet, active])]),
+                    ok = inet:setopts(Sock, [{active, once}]),
+                    ?DEBUG2("after set ~p", [inet:getopts(Sock, [packet, active])]),
                     Val
             end;
         {tcp_closed, _Socket} ->
@@ -180,6 +186,36 @@ do_recv_loop(Sock, State, Server) ->
             throw({recv, timeout})
     end.
 
+%% recv the bulk data 
+recv_bulk_data(Sock, N) ->
+    ?DEBUG2("recv bulk data len:~p", [N]),
+    ok = inet:setopts(Sock, [{packet, raw}]),
+    <<Val:N/bytes, "\r\n">> = recv_n(Sock, N+2), % include \r\n
+    ok = inet:setopts(Sock, [{packet, line}]),
+    Val.
+
+%% recv the multiple bulk replies
+recv_bulks(Sock, Server, M) ->
+    recv_bulks1(Sock, Server, M, []).
+
+recv_bulks1(_Sock, _Server, 0, Acc) ->
+    lists:reverse(Acc);
+recv_bulks1(Sock, Server, N, Acc) ->
+    Bulk = do_recv(Sock, Server, mbulk),
+    recv_bulks1(Sock, Server, N-1, [Bulk | Acc]).
+
+recv_n(Sock, N) ->
+    case gen_tcp:recv(Sock, N, ?RECV_TIMEOUT) of
+        {ok, Data} ->
+            Data;
+        {error, timeout} ->
+            ?ERROR2("recv message timeout", []),
+            throw({recv, timeout});
+        {error, R} ->
+            ?ERROR2("recv message error:~p", [R]),
+            exit({tcp_error, R})
+    end.
+    
 %% do the auth
 do_auth(Sock, Server, Passwd) ->
     ?DEBUG2("auth to server ~p passwd :~p", [Server, Passwd]),
