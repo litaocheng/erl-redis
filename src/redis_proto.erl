@@ -19,7 +19,7 @@
 
 -compile([opt_bin_info]).
 -compile({inline, [line/1, line/2, line/3, line/4, line_list/1,
-         bulk/3, bulk/4, mbulk/1]}).  
+         bulk/3, bulk/4, mbulk/1, parse_reply/2]}).  
 
 %% @doc generate the line 
 -spec line(iolist()) -> iolist().
@@ -59,7 +59,6 @@ bulk(Type, Arg1, Arg2) ->
     L1 = line(Type, Arg1, ?N2S(iolist_size(Arg2))),
     L2 = line(Arg2),
     [L1, L2].
-
 -spec bulk(iolist(), iolist(), iolist(), iolist()) -> 
     iolist().
 bulk(Type, Arg1, Arg2, Arg3) ->
@@ -76,18 +75,56 @@ mbulk(L) ->
     ["*", ?N2S(N), ?CRLF | Lines].
 
 %% @doc parse the reply
--spec parse_reply(Bin :: binary(), Sock :: port()) ->
+-spec parse_reply(Bin :: binary(), any()) ->
     any().
-parse_reply(<<"+", Rest/binary>>, Sock) ->
-    parse_status_reply(Rest, Sock);
-parse_reply(<<"-", Rest/binary>>, Sock) ->
-    parse_error_reply(Rest, Sock);
-parse_reply(<<":", Rest/binary>>, Sock) ->
-    parse_intger_reply(Rest, Sock);
-parse_reply(<<"$", Rest/binary>>, Sock) ->
-    parse_bulk_reply(Rest, Sock);
-parse_reply(<<"*", Rest/binary>>, Sock) ->
-    parse_mbulk_reply(Rest, Sock).
+parse_reply(<<"+", Rest/binary>>, init) ->
+    parse_status_reply(Rest);
+parse_reply(<<"-", Rest/binary>>, init) ->
+    parse_error_reply(Rest);
+parse_reply(<<":", Rest/binary>>, init) ->
+    b2n(Rest);
+
+parse_reply(<<"$-1\r\n">>, init) ->
+    null;
+parse_reply(<<"$0\r\n">>, init) ->
+    <<>>;
+parse_reply(<<"$", Rest/binary>>, init) ->
+    N = b2n(Rest),
+    {bulk_more, N};
+parse_reply(Bin, {bulk_more, N}) ->
+    <<Val:N/bytes, "\r\n">> = Bin,
+    Val;
+
+parse_reply(<<"*-1\r\n">>, init) ->
+    null;
+parse_reply(<<"*0\r\n">>, init) ->
+    null;
+parse_reply(<<"*", Rest/binary>>, init) ->
+    N = b2n(Rest),
+    {mbulk_more, N, [], next};
+parse_reply(Bin, {mbulk_more, N, Acc, Bulk = {bulk_more, _}}) ->
+    Item = parse_reply(Bin, Bulk),
+    ?DEBUG2("parse_reply n:~p item:~p", [N, Item]),
+    case N of
+        1 ->
+            lists:reverse([Item | Acc]);
+        _ ->
+            {mbulk_more, N-1, [Item | Acc], next}
+    end;
+parse_reply(Bin, {mbulk_more, N, Acc, next}) ->
+    Bulk = parse_reply(Bin, init),
+    ?DEBUG2("parse_reply n:~p bulk:~p", [N, Bulk]),
+    case Bulk of
+        null ->
+            case N of
+                1 ->
+                    lists:reverse([null | Acc]);
+                _ ->
+                    {mbulk_more, N-1, [null | Acc], next}
+            end;
+        _ ->
+            {mbulk_more, N, Acc, Bulk}
+    end.
 
 %% @doc return a list of tokens in string, separated by the characters
 %%  in Separatorlist
@@ -95,7 +132,6 @@ parse_reply(<<"*", Rest/binary>>, Sock) ->
 tokens(S, Sep) when is_integer(Sep) ->
     ?DEBUG2("string is ~p sep is ~p", [S, Sep]),
     tokens1(S, Sep, []).
-
 
 %%
 %%------------------------------------------------------------------------------
@@ -128,86 +164,36 @@ tokens2(<<>>, _Sep, Toks, Bin) ->
     lists:reverse([Bin | Toks]).
 
 %% parse status reply
-parse_status_reply(<<"OK\r\n">>, _Sock) ->
+parse_status_reply(<<"OK\r\n">>) ->
     ok;
-parse_status_reply(<<"QUEUED\r\n">>, _Sock) ->
+parse_status_reply(<<"QUEUED\r\n">>) ->
     queued;
-parse_status_reply(<<"PONG\r\n">>, _Sock) ->
+parse_status_reply(<<"PONG\r\n">>) ->
     pong;
-parse_status_reply(<<"none\r\n">>, _Sock) ->
+parse_status_reply(<<"none\r\n">>) ->
     none;
-parse_status_reply(<<"string\r\n">>, _Sock) ->
+parse_status_reply(<<"string\r\n">>) ->
     string;
-parse_status_reply(<<"list\r\n">>, _Sock) ->
+parse_status_reply(<<"list\r\n">>) ->
     list;
-parse_status_reply(<<"set\r\n">>, _Sock) ->
+parse_status_reply(<<"set\r\n">>) ->
     set;
-parse_status_reply(Status, _Sock) ->
+parse_status_reply(Status) ->
     Len = byte_size(Status) - 2,
     <<Val:Len/bytes, "\r\n">> = Status,
     Val.
 
 %% parse error reply
-parse_error_reply(Bin, _Sock) when is_binary(Bin) ->
+parse_error_reply(Bin) when is_binary(Bin) ->
     L = byte_size(Bin) - 2,
     <<Msg:L/bytes, "\r\n">> = Bin,
     {error, Msg}.
 
-%% parse integer repley
-parse_intger_reply(<<"0\r\n">>, _Sock) ->
-    0;
-parse_intger_reply(<<"1\r\n">>, _Sock) ->
-    1;
-parse_intger_reply(Bin, _Sock) ->
-    b2n(Bin).
-    
-%% parse bulk reply
-parse_bulk_reply(<<"-1\r\n">>, _Sock) ->
-    null;
-parse_bulk_reply(Bin, Sock) ->
-    N = b2n(Bin),
-    ok = inet:setopts(Sock, [{packet, raw}]),
-    <<Val:N/bytes, _/binary>> = recv_n(Sock, N + 2),
-    ok = inet:setopts(Sock, [{packet, line}]),
-    Val.
-     
-%% parse multi bulk reply
-parse_mbulk_reply(<<"-1\r\n">>, _Sock) ->
-    null;
-parse_mbulk_reply(Bin, Sock) ->
-    N = b2n(Bin),
-    lists:reverse(parse_mbulk_reply1(N, Sock, [])).
-
-parse_mbulk_reply1(0, _Sock, Acc) ->
-    Acc;
-parse_mbulk_reply1(N, Sock, Acc) ->
-    Bin = recv_line(Sock),
-    Reply = parse_reply(Bin, Sock),
-    parse_mbulk_reply1(N - 1, Sock, [Reply | Acc]).
-    
-%% recv n bytes
-recv_n(Sock, Len) ->
-    case gen_tcp:recv(Sock, Len, ?RECV_TIMEOUT) of
-        {ok, Bin} ->
-            ?DEBUG2("recv_n :~p", [Bin]),
-            Bin;
-        {error, Reason} ->
-            ?ERROR2("recv n bytes error:~p", [Reason]),
-            throw({tcp_error, Reason})
-    end.
-
-%% recv line bytes
-recv_line(Sock) ->
-    case gen_tcp:recv(Sock, 0, ?RECV_TIMEOUT) of
-        {ok, Bin} ->
-            ?DEBUG2("recv_line :~p", [Bin]),
-            Bin;
-        {error, Reason} ->
-            ?ERROR2("recv line error:~p", [Reason]),
-            throw({tcp_error, Reason})
-    end.
-
 %% binary to integer
+b2n(<<"0\r\n">>) ->
+    0;
+b2n(<<"1\r\n">>) ->
+    1;
 b2n(<<$-, Rest/binary>>) ->
     -b2n(Rest);
 b2n(Bin) ->
@@ -229,26 +215,46 @@ b2n_test_() ->
     ].
 
 parse_reply(Bin) ->
-    parse_reply(Bin, {}).
+    parse_reply(Bin, init).
 
-parse_test_() ->
-    [
-        ?_assertEqual(ok, parse_reply(<<"+OK\r\n">>)),
-        ?_assertEqual(queued, parse_reply(<<"+QUEUED\r\n">>)),
-        ?_assertEqual(pong, parse_reply(<<"+PONG\r\n">>)),
+parse_test() ->
+    ?assertEqual(ok, parse_reply(<<"+OK\r\n">>)),
+    ?assertEqual(queued, parse_reply(<<"+QUEUED\r\n">>)),
+    ?assertEqual(pong, parse_reply(<<"+PONG\r\n">>)),
+    ?assertEqual(<<"OTHER STATUS">>, parse_reply(<<"+OTHER STATUS\r\n">>)),
 
-        ?_assertEqual({error, <<"FORMAT">>}, parse_reply(<<"-FORMAT\r\n">>)),
-        ?_assertEqual({error, <<"UNKNOWN">>}, parse_reply(<<"-UNKNOWN\r\n">>)),
+    ?assertEqual({error, <<"FORMAT">>}, parse_reply(<<"-FORMAT\r\n">>)),
+    ?assertEqual({error, <<"UNKNOWN">>}, parse_reply(<<"-UNKNOWN\r\n">>)),
 
-        ?_assertEqual(0, parse_reply(<<":0\r\n">>)),
-        ?_assertEqual(1, parse_reply(<<":1\r\n">>)),
-        ?_assertEqual(231, parse_reply(<<":231\r\n">>)),
-        ?_assertEqual(987234, parse_reply(<<":987234\r\n">>)),
+    ?assertEqual(0, parse_reply(<<":0\r\n">>)),
+    ?assertEqual(1, parse_reply(<<":1\r\n">>)),
+    ?assertEqual(231, parse_reply(<<":231\r\n">>)),
+    ?assertEqual(987234, parse_reply(<<":987234\r\n">>)),
+    ?assertEqual(-3, parse_reply(<<":-3\r\n">>)),
 
-        ?_assertEqual(null, parse_reply(<<"$-1\r\n">>)),
-        ?_assertEqual(null, parse_reply(<<"*-1\r\n">>)),
+    ?assertEqual(null, parse_reply(<<"$-1\r\n">>)),
+    ?assertEqual(<<>>, parse_reply(<<"$0\r\n">>)),
+    ?assertEqual({bulk_more, 1}, parse_reply(<<"$1\r\n">>)),
+    ?assertEqual({bulk_more, 10}, parse_reply(<<"$10\r\n">>)),
+    ?assertEqual(<<"0123456789">>, parse_reply(<<"0123456789\r\n">>, {bulk_more, 10})),
+    ?assertError({badmatch, _}, parse_reply(<<"0123456789">>, {bulk_more, 10})),
 
-        ?_assert(true)
-    ].
+    MB1 = {mbulk_more, 2, [], next},
+    MB21 = {mbulk_more, 2, [], {bulk_more, 5}},
+    MB22 = {mbulk_more, 1, [<<"hello">>], next},
+    MB31 = {mbulk_more, 1, [<<"hello">>], {bulk_more, 3}},
+    MB32 = [<<"hello">>, <<"bob">>],
+    ?assertEqual(null, parse_reply(<<"*-1\r\n">>)),
+    ?assertEqual(null, parse_reply(<<"*0\r\n">>)),
+    ?assertEqual(MB1, parse_reply(<<"*2\r\n">>)),
+    ?assertEqual(MB21, parse_reply(<<"$5\r\n">>, MB1)),
+    ?assertEqual(MB22, parse_reply(<<"hello\r\n">>, MB21)),
+    ?assertEqual(MB31, parse_reply(<<"$3\r\n">>, MB22)),
+    ?assertEqual(MB32, parse_reply(<<"bob\r\n">>,MB31)), 
+
+    ?assertEqual({mbulk_more, 1, [], next}, parse_reply(<<"*1\r\n">>)),
+    ?assertEqual([null], parse_reply(<<"$-1\r\n">>, {mbulk_more, 1, [], next})),
+
+    ok.
 
 -endif.

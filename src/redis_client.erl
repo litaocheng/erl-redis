@@ -27,7 +27,7 @@
         db = 0              % the default db index
     }).
 
--define(TCP_OPTS, [inet, binary, {active, false}, 
+-define(TCP_OPTS, [inet, binary, {active, true}, 
             {packet, line}, {nodelay, true},
             {recbuf, 102400},
             {sndbuf, 102400},
@@ -79,6 +79,7 @@ multi_send(Clients, Data, Timeout) when is_list(Clients) ->
 %%
 init({Server = {Host, Port}, Index, Timeout, Passwd}) ->
     ?DEBUG2("init the redis client ~p:~p (~p)", [Host, Port, Index]),
+    process_flag(trap_exit, true),
     case gen_tcp:connect(Host, Port, ?TCP_OPTS, Timeout) of
         {ok, Sock} ->
             case do_auth(Sock, Server,Passwd) of
@@ -116,10 +117,15 @@ handle_cast(_Msg, State) ->
 handle_info({error, timeout}, State) -> % send timeout
     ?ERROR2("send timeout, the socket closed, process will restart", []),
     {stop, {error, timeout}, State};
+handle_info({tcp_closed, Sock}, State = #state{sock = Sock}) ->
+    ?ERROR2("socket closed by remote peer", []),
+    {stop, tcp_closed, State};
 handle_info(_Info, State) ->
+    ?DEBUG2("receive message:~p", [_Info]),
     {noreply, State}.
 
 terminate(_Reason, _State) ->
+    ?DEBUG2("terminate reason:~p", [_Reason]),
     ok.
 
 code_change(_Old, State, _Extra) ->
@@ -145,17 +151,34 @@ to_regname(Host, Port, Index, First) ->
 do_send_recv(Data, Sock, Server) ->
     case gen_tcp:send(Sock, Data) of
         ok -> % receive response
-            case gen_tcp:recv(Sock, 0, ?RECV_TIMEOUT) of
-                {ok, Packet} ->
-                    ?DEBUG2("recv reply :~p", [Packet]),
-                    redis_proto:parse_reply(Packet, Sock);
-                {error, Reason} ->
-                    ?ERROR2("recv message from ~p error:~p", [Server, Reason]),
-                    {tcp_error, Reason}
-            end;
+            do_recv_loop(Sock, init, Server);
         {error, Reason} ->
             ?ERROR2("send message to ~p error:~p", [Server, Reason]),
-            {tcp_error, Reason}
+            exit({error, Reason})
+    end.
+
+do_recv_loop(Sock, State, Server) ->
+    receive 
+        {tcp, Sock, Packet} ->
+            ?DEBUG2("receive packet :~p", [Packet]),
+            case redis_proto:parse_reply(Packet, State) of
+                {bulk_more, _} = State2 ->
+                    do_recv_loop(Sock, State2, Server);
+                {mbulk_more, _, _, _} = State2 ->
+                    do_recv_loop(Sock, State2, Server);
+                Val ->
+                    Val
+            end;
+        {tcp_closed, _Socket} ->
+            ?ERROR2("socket closed by remote peer", []),
+            exit(tcp_closed);
+        {tcp_error, _Socket, Reason} ->
+            ?ERROR2("recv message from ~p error:~p", [Server, Reason]),
+            exit({tcp_error, Reason})
+    after 
+        ?RECV_TIMEOUT ->
+            ?ERROR2("recv message from ~p timeout", [Server]),
+            throw({recv, timeout})
     end.
 
 %% do the auth
@@ -275,8 +298,3 @@ unmonitor(Ref) when is_reference(Ref) ->
     after 0 ->
 	    true
     end.
-
-
--ifdef(TEST).
-
--endif.
