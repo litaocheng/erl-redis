@@ -121,7 +121,6 @@ handle_info({tcp_closed, Sock}, State = #state{sock = Sock}) ->
     ?ERROR2("socket closed by remote peer", []),
     {stop, tcp_closed, State};
 handle_info(_Info, State) ->
-    ?DEBUG2("receive message:~p", [_Info]),
     {noreply, State}.
 
 terminate(_Reason, _State) ->
