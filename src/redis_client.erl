@@ -159,7 +159,7 @@ do_send_recv(Data, Sock, Server) ->
 do_recv(Sock, Server, State) ->
     receive 
         {tcp, Sock, Packet} ->
-            ?DEBUG2("receive packet :~p size: ~p", [Packet, byte_size(Packet)]),
+            ?DEBUG2("receive packet :~p", [Packet]),
             %?DEBUG2("active :~p", [inet:getopts(Sock, [active])]),
             case redis_proto:parse_reply(Packet) of
                 {bulk_more, N} -> % bulk reply
