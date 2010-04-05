@@ -203,7 +203,7 @@ parse_test() ->
     ?assertEqual(-3, parse_reply(<<":-3\r\n">>)),
 
     ?assertEqual(null, parse_reply(<<"$-1\r\n">>)),
-    ?assertEqual(<<>>, parse_reply(<<"$0\r\n">>)),
+    ?assertEqual({bulk_more, 0}, parse_reply(<<"$0\r\n">>)),
     ?assertEqual({bulk_more, 1}, parse_reply(<<"$1\r\n">>)),
     ?assertEqual({bulk_more, 10}, parse_reply(<<"$10\r\n">>)),
 
