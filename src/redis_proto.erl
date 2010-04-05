@@ -87,7 +87,7 @@ parse_reply(<<":", Rest/binary>>) ->
 parse_reply(<<"$-1\r\n">>) ->
     null;
 parse_reply(<<"$0\r\n">>) ->
-    <<>>;
+    {bulk_more, 0}; 
 parse_reply(<<"$", Rest/binary>>) ->
     N = b2n(Rest),
     {bulk_more, N};

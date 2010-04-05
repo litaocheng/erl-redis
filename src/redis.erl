@@ -158,8 +158,15 @@ type(Key) ->
 -spec keys(Pattern :: pattern()) -> 
     {[key()], [atom()]}.
 keys(Pattern) ->
-    call_clients_one(line(<<"KEYS">>, Pattern)).
-    %redis_proto:tokens(Bin, $\s).
+    {Replies, BadServers} = call_clients_one(line(<<"KEYS">>, Pattern)),
+    KeyL = 
+    lists:foldl(
+        fun({_Server, R}, Acc) ->
+            L = redis_proto:tokens(R, $\s),
+            [L | Acc]
+        end,
+    [], Replies),
+    {lists:append(KeyL), BadServers}.
 
 
 %% @doc return a randomly selected key from the currently selected DB
