@@ -659,20 +659,21 @@ zset_reverse_index(Key, Mem) ->
 %% @doc return a range of elements from the sorted set
 %% O(log(N))+O(M)
 -spec zset_range_index(Key :: key(), Start :: index(), End :: index(), 
-        WithScore :: boolean()) -> [value()].
+        WithScore :: boolean()) -> 
+            'null' | [value() | {key(), value()}].
 zset_range_index(Key, Start, End, WithScore) ->
     do_zset_range_index(<<"ZRANGE">>, Key, Start, End, WithScore).
 
 %% @doc return a range of elements form the sorted set, like zset_range_index, but 
 %% the sorted set is ordered in traversed in reverse order.
 -spec zset_range_index_reverse(Key :: key(), Start :: index(), End :: index(),
-        WithScore :: boolean()) -> [value()].
+        WithScore :: boolean()) -> [value() | {key(), value()}].
 zset_range_index_reverse(Key, Start, End, WithScore) ->
     do_zset_range_index(<<"ZREVRANGE">>, Key, Start, End, WithScore).
 
 %% @doc return all elements with score in the specified scope
 -spec zset_range_score(Key :: key(), Min :: score(), Max :: score(), 
-    WithScore :: boolean()) -> [value()].
+    WithScore :: boolean()) -> [value() | {key(), value()}].
 zset_range_score(Key, Min, Max, WithScore) ->
     case WithScore of
         false ->
@@ -686,7 +687,7 @@ zset_range_score(Key, Min, Max, WithScore) ->
 
 -spec zset_range_score(Key :: key(), Min :: score(), Max :: score(), 
     Start :: index(), Count :: integer(), WithScore :: boolean()) ->
-        [value()].
+        [value() | {key(), value()}].
 zset_range_score(Key, Min, Max, Start, Count, WithScore) ->
     case WithScore of
         false ->
@@ -1038,6 +1039,8 @@ get_app_vsn() ->
 
 %% convert list like [f1, v1, f2, v2] to the key-value tuple
 %% [{f1, v1}, {f2, v2}].
+list_to_kv_tuple(null) ->
+    null;
 list_to_kv_tuple(L) ->
     list_to_kv_tuple(L, null).
 
