@@ -4,7 +4,8 @@
 %%%
 %%% @author litaocheng@gmail.com
 %%% @doc the interface for redis, this module is parametered module,
-%%%     the parameter is the Manager process registered name
+%%%     the parameter is the Manager process registered name,the group and
+%%%     the server mode
 %%% @end
 %%%
 %%%----------------------------------------------------------------------
@@ -246,7 +247,13 @@ ttl(Key) ->
 -spec select(Index :: index()) ->
     'ok' | {'error', [inet_server()]}.
 select(Index) ->
-    redis_manager:select_db(Index).
+    {_Replies, BadServers} = call_clients_one(line(<<"PING">>)),
+    case BadServers of
+        [] ->
+            redis_manager:set_selected_db(Manager, Index);
+        [_|_] ->
+            {error, BadServers}
+    end.
 
 %% @doc move the specified key  from the currently selected DB to the specified
 %% destination DB
@@ -659,21 +666,23 @@ zset_reverse_index(Key, Mem) ->
 %% @doc return a range of elements from the sorted set
 %% O(log(N))+O(M)
 -spec zset_range_index(Key :: key(), Start :: index(), End :: index(), 
-        WithScore :: boolean()) -> 
-            'null' | [value() | {key(), value()}].
+    WithScore :: boolean()) -> 
+        'null' | [value() | {key(), value()}].
 zset_range_index(Key, Start, End, WithScore) ->
     do_zset_range_index(<<"ZRANGE">>, Key, Start, End, WithScore).
 
 %% @doc return a range of elements form the sorted set, like zset_range_index, but 
 %% the sorted set is ordered in traversed in reverse order.
 -spec zset_range_index_reverse(Key :: key(), Start :: index(), End :: index(),
-        WithScore :: boolean()) -> [value() | {key(), value()}].
+    WithScore :: boolean()) -> 
+        'null' | [value() | {key(), value()}].
 zset_range_index_reverse(Key, Start, End, WithScore) ->
     do_zset_range_index(<<"ZREVRANGE">>, Key, Start, End, WithScore).
 
 %% @doc return all elements with score in the specified scope
 -spec zset_range_score(Key :: key(), Min :: score(), Max :: score(), 
-    WithScore :: boolean()) -> [value() | {key(), value()}].
+    WithScore :: boolean()) -> 
+        'null' | [value() | {key(), value()}].
 zset_range_score(Key, Min, Max, WithScore) ->
     case WithScore of
         false ->
@@ -687,7 +696,7 @@ zset_range_score(Key, Min, Max, WithScore) ->
 
 -spec zset_range_score(Key :: key(), Min :: score(), Max :: score(), 
     Start :: index(), Count :: integer(), WithScore :: boolean()) ->
-        [value() | {key(), value()}].
+        'null' | [value() | {key(), value()}].
 zset_range_score(Key, Min, Max, Start, Count, WithScore) ->
     case WithScore of
         false ->
