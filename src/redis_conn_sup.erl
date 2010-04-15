@@ -33,7 +33,7 @@ connect(Host, Port, Index, Timeout, Passwd) ->
 %% @doc the connection supervisor callback
 init([]) -> 
     ?DEBUG2("init supervisor", []),
-    Stragegy = {simple_one_for_one, 10, 10},
+    Stragegy = {simple_one_for_one, 100000, 60},
     Client = {undefined, {redis_client, start_link, []},
                 permanent, 1000, worker, [redis_client]},
 

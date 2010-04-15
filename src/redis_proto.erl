@@ -99,8 +99,7 @@ parse_reply(<<"*", Rest/binary>>) ->
     N = b2n(Rest),
     {mbulk_more, N}.
 
-%% @doc return a list of tokens in string, separated by the characters
-%%  in Separatorlist
+%% @doc return a list of tokens in binary, separated by the character Sep
 -spec tokens(S :: binary(), Sep :: char()) -> [binary()].
 tokens(S, Sep) when is_integer(Sep) ->
     ?DEBUG2("string is ~p sep is ~p", [S, Sep]),
