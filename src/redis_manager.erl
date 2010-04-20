@@ -15,7 +15,7 @@
 
 
 -export([start/3, start_link/3]).
--export([set_selected_db/2]).
+-export([set_selected_db/2, get_selected_db/1]).
 -export([server_list/1, server_type/1]).
 -export([get_client_smode/2, get_client/2, get_clients_one/1, get_clients_all/1]).
 -export([partition_keys/2, partition_keys/3]).
@@ -52,6 +52,12 @@ start_link(Name, Mode, Passwd) ->
     'ok' | {'error', any()}.
 set_selected_db(Mgr, Index) ->
     gen_server:call(Mgr, {set, dbindex, Index}).
+
+%% @doc get the selected db
+-spec get_selected_db(atom()) ->
+    index().
+get_selected_db(Mgr) ->
+    gen_server:call(Mgr, {get, dbindex}).
 
 %% @doc get the server list 
 -spec server_list(Mgr :: atom()) ->
@@ -155,6 +161,8 @@ handle_call({get_server, Type}, _From, State) ->
     {reply, Reply, State};
 handle_call({set, dbindex, Index}, _From, State) ->
     {reply, ok, State#state{dbindex = Index}};
+handle_call({get, dbindex}, _From, State = #{dbindx = Index}) ->
+    {reply, Index, State};
 handle_call(_Msg, _From, State) ->
     {noreply, State}.
 

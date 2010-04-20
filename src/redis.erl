@@ -96,7 +96,7 @@ server_type() ->
 %% @doc return the currently selected db
 -spec db() -> index().
 db() ->
-    0.
+    redis_manager:get_selected_db(Manager).
 
 %%------------------------------------------------------------------------------
 %% generic commands
@@ -247,7 +247,7 @@ ttl(Key) ->
 -spec select(Index :: index()) ->
     'ok' | {'error', [inet_server()]}.
 select(Index) ->
-    {_Replies, BadServers} = call_clients_one(line(<<"PING">>)),
+    {_Replies, BadServers} = call_clients_one(mbulk(<<"SELECT">>, ?N2S(Index))),
     case BadServers of
         [] ->
             redis_manager:set_selected_db(Manager, Index);

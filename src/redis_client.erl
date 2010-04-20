@@ -64,13 +64,13 @@ send(Client, Data) ->
     gen_server:call(Client, {command, Data}).
 
 %% @doc send to multi clients
--spec multi_send(Clients :: [pid()], Data :: iolist()) ->
-    {[{pid(), any()}], [pid()]}.
+-spec multi_send(Clients :: [atom()], Data :: iolist()) ->
+    {[{atom(), any()}], [atom()]}.
 multi_send(Clients, Data) when is_list(Clients) ->
     do_multi_send(Clients, {command, Data}, infinity).
 
--spec multi_send(Clients :: [pid()], Data :: iolist(), Timeout :: timeout()) ->
-    {[{pid(), any()}], [pid()]}.
+-spec multi_send(Clients :: [atom()], Data :: iolist(), Timeout :: timeout()) ->
+    {[{atom(), any()}], [atom()]}.
 multi_send(Clients, Data, Timeout) when is_list(Clients) ->
     do_multi_send(Clients, {command, Data}, Timeout).
 
