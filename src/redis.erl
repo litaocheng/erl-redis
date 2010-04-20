@@ -163,9 +163,10 @@ keys(Pattern) ->
     {Replies, BadServers} = call_clients_one(mbulk(<<"KEYS">>, Pattern)),
     KeyL = 
     lists:foldl(
-        fun({_Server, R}, Acc) ->
-            L = redis_proto:tokens(R, $\s),
-            [L | Acc]
+        fun({_Server, null}, Acc) ->
+                [[] | Acc];
+            ({_Server, R}, Acc) ->
+                [R | Acc]
         end,
     [], Replies),
     {lists:append(KeyL), BadServers}.
@@ -879,7 +880,7 @@ sort(Key, SortOpt) ->
     end,
 
     L = 
-    call_key(Key, mbulk([<<"SORT">>, Key | 
+    call_key(Key, mbulk_list([<<"SORT">>, Key | 
         lists:append([ByPart, LimitPart, GetPart, AscPart, AlphaPart, StorePart])
     ])),
     list_to_n_tuple(L, FieldCount).

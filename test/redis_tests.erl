@@ -25,12 +25,12 @@ do(Config) ->
     test_zset(Config),
 
     % Redis 1.3.4
-    %test_hash(Config),
+    test_hash(Config),
 
     test_sort(Config),
 
     % Redis 1.3.4
-    %test_trans(Config),
+    test_trans(Config),
 
     test_persistence(Config),
     ok.
@@ -88,11 +88,9 @@ test_string(Config) ->
 
 test_list(Config) -> 
     Redis = ?config(redis_client, Config),
-    %1 = ?PF(Redis:list_push_tail("mylist", "e1")),
-    ok = ?PF(Redis:list_push_tail("mylist", "e1")),
+    1 = ?PF(Redis:list_push_tail("mylist", "e1")),
     {error, _} = ?PF(Redis:list_push_tail("key1", "e1")),
-    %2 = ?PF(Redis:list_push_head("mylist", "e2")),
-    ok = ?PF(Redis:list_push_head("mylist", "e2")),
+    2 = ?PF(Redis:list_push_head("mylist", "e2")),
     int(?PF(Redis:list_len("mylist"))),
     [_|_] = ?PF(Redis:list_range("mylist", 0, -1)),
     [_] = ?PF(Redis:list_range("mylist", 0, 0)),
@@ -170,16 +168,16 @@ test_zset(Config) ->
 test_hash(Config) -> 
     Redis = ?config(redis_client, Config),
     % Redis 1.3.4
-    %true = ?PF(Redis:hash_set("myhash", "f1", "v1")),
+    true = ?PF(Redis:hash_set("myhash", "f1", "v1")),
     <<"v1">> = ?PF(Redis:hash_get("myhash", "f1")),
     null = ?PF(Redis:hash_get("myhash", "f2")),
     true = ?PF(Redis:hash_del("myhash", "f1")),
     false = ?PF(Redis:hash_del("myhash", "f2")),
 
     % Redis 1.3.4
-    %true = ?PF(Redis:hash_set("myhash", "f1", "v1")),
-    %?PF(Redis:hash_exists("myhash", "f1")),
-    %?PF(Redis:hash_exists("myhash", "f2")),
+    true = ?PF(Redis:hash_set("myhash", "f1", "v1")),
+    ?PF(Redis:hash_exists("myhash", "f1")),
+    ?PF(Redis:hash_exists("myhash", "f2")),
     true = ?PF(Redis:hash_set("myhash", "f2", "v2")),
     2 = ?PF(Redis:hash_len("myhash")),
     [<<"f1">>, <<"f2">>] = ?PF(Redis:hash_keys("myhash")),
