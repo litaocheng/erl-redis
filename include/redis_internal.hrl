@@ -39,8 +39,19 @@
 -define(CRLF_BIN, <<"\r\n">>).
 
 %% for redis module paramters
--define(PGROUP_DEFAULT, '$default').
--define(PCLIENT_NULL, '$null').
+-define(GROUP_DEFAULT, '$default').
+-define(CONTEXT_NORMAL, '$ctx_normal').
+-define(CONTEXT_TRANS, '$ctx_trans').
+-define(CLIENT_NULL, '$null').
+
+-define(FUN_NULL, '$fnull').
+-define(CALL_FUN(V, Fun), 
+            case Fun of
+                ?FUN_NULL ->
+                    V;
+                _ ->
+                    Fun(V)
+            end).
 
 %% the redis supervisor name
 -define(REDIS_SUP, redis_sup).

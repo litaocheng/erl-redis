@@ -17,7 +17,7 @@
 -export([start/3, start_link/3]).
 -export([set_selected_db/2]).
 -export([server_list/1, server_type/1]).
--export([get_client_smode/2, get_client/2, get_clients/1]).
+-export([get_client/2, get_clients/1]).
 -export([partition_keys/2, partition_keys/3]).
 
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -72,21 +72,12 @@ server_list(Mgr) ->
 server_type(Mgr) ->
     gen_server:call(Mgr, server_type).
 
-%% @doc get a client, the manager must be in single mode
--spec get_client_smode(atom(), server_type()) -> 
-    {'ok', atom()}.
-get_client_smode(Mgr, single) ->
-    {ok, [Server]} = get_server(Mgr, all),
-    {ok, random_client(Server)};
-get_client_smode(_Mgr, _) ->
-    throw({error, must_single_mode}).
-
 %% @doc get the client according to the Key
 -spec get_client(atom(), key()) ->
     {'ok', atom()} | {'error', any()}.
 get_client(Mgr, Key) ->
-    {ok, {Host, Port, PoolSize}} = get_server(Mgr, Key),
-    {ok, redis_client:to_regname(Host, Port, random:uniform(PoolSize))}.
+    {ok, Server} = get_server(Mgr, Key),
+    {ok, random_client(Server)}.
 
 %% @doc pick up one connection from the connection pool for each server
 -spec get_clients(atom()) -> [atom()].

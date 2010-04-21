@@ -9,7 +9,7 @@
 %%% @end
 %%%
 %%%----------------------------------------------------------------------
--module(redis, [PManager, PGroup, PSType, PClient]).
+-module(redis, [PManager, PGroup, PSType, PContext, PClient]).
 -author('ltiaocheng@gmail.com').
 -vsn('0.1').
 -include("redis_internal.hrl").
@@ -30,7 +30,8 @@
 -export([list_push_tail/2, list_push_head/2, list_len/1, list_range/3, 
         list_trim/3, list_index/2, list_set/3, 
         list_rm/2, list_rm_from_head/3, list_rm_from_tail/3,
-        list_pop_head/1, list_pop_tail/1, list_tail_to_head/2]).
+        list_pop_head/1, list_pop_tail/1, list_tail_to_head/2,
+        list_block_pop_head/2, list_block_pop_tail/2]).
 
 %% set commands
 -export([set_add/2, set_rm/2, set_pop/1, set_move/3, set_len/1, set_is_member/2,
@@ -84,6 +85,12 @@
             {error, BadServers}
     end.
 
+-define(MUST_SINGLE,
+    if PSType =/= single ->
+        throw(must_single_mode);
+    true ->
+        ok
+    end).
 
 %% @doc show stats info in the stdout
 -spec i() -> 'ok'.
@@ -148,13 +155,8 @@ delete(Key) ->
 -spec multi_delete(Keys :: [key()]) -> 
     non_neg_integer().
 multi_delete(Keys) ->
-    ClientKeys = redis_manager:partition_keys(PManager, Keys),
-    ?DEBUG2("client keys is ~p", [ClientKeys]),
-    L =
-    [begin
-        Cmd = mbulk_list([<<"DEL">> | KLPart]),
-        call(Client, Cmd)
-    end || {Client, KLPart} <- ClientKeys],
+    L = call_partition_keys(<<"DEL">>, Keys, ?FUN_NULL),
+    ?DEBUG2("multi_delete reply : ~p", [L]),
     lists:sum(L).
 
 %% @doc return the type of the value stored at key
@@ -203,8 +205,8 @@ random_key() ->
 -spec rename(OldKey :: key(), NewKey :: key()) -> 
     'ok'.
 rename(OldKey, NewKey) ->
-    {ok, Client} = redis_manager:get_client_smode(PManager, PSType),
-    call(Client, mbulk(<<"RENAME">>, OldKey, NewKey)).
+    ?MUST_SINGLE,
+    call_key(OldKey, mbulk(<<"RENAME">>, OldKey, NewKey)).
 
 %% @doc  rename oldkey into newkey  but fails if the destination key newkey already exists. 
 %% NOTE: MUST single mode
@@ -212,14 +214,14 @@ rename(OldKey, NewKey) ->
 -spec rename_not_exists(OldKey :: key(), NewKey :: key()) -> 
     boolean().
 rename_not_exists(OldKey, NewKey) ->
-    {ok, Client} = redis_manager:get_client_smode(PManager, PSType),
-    R = call(Client, mbulk(<<"RENAMENX">>, OldKey, NewKey)),
+    ?MUST_SINGLE,
+    R = call_key(OldKey, mbulk(<<"RENAMENX">>, OldKey, NewKey)),
     int_may_bool(R).
 
 %% @doc return the nubmer of keys in all the currently selected database
 %% O(1)
 -spec dbsize() -> 
-    {integer() , [inet_server()]}.
+    integer() | {'error', integer(), [atom()]}.
 dbsize() ->
     {Replies, BadServers} = call_clients(mbulk(<<"DBSIZE">>)),
     Size = 
@@ -275,8 +277,8 @@ select(Index) ->
 -spec move(Key :: key(), DBIndex :: index()) ->
     boolean().
 move(Key, DBIndex) ->
-    {ok, Client} = redis_manager:get_client_smode(PManager, PSType),
-    R = call(Client, mbulk(<<"MOVE">>, Key, ?N2S(DBIndex))),
+    ?MUST_SINGLE,
+    R = call_key(Key, mbulk(<<"MOVE">>, Key, ?N2S(DBIndex))),
     int_may_bool(R).
 
 %% @doc delete all the keys of the currently selected DB
@@ -321,23 +323,12 @@ getset(Key, Val) ->
     [string() | null()].
 multi_get(Keys) ->
     Len = length(Keys),
-    KeyIs = lists:zip(lists:seq(1, Len), Keys),
+    KeyIndexs = lists:zip(lists:seq(1, Len), Keys),
     KFun = fun({_Index, K}) -> K end,
-    ClientKeys = redis_manager:partition_keys(PManager, KeyIs, KFun),
-    ?DEBUG2("get client keys partions is ~p", [ClientKeys]),
-
-    L =
-    [begin
-        KsPart = [KFun(KI) || KI <- KIsPart],
-        Cmd = mbulk_list([<<"MGET">> | KsPart]),
-
-        Replies = redis_client:send(Client, Cmd),
-        lists:zip(KIsPart, Replies)
-    end || {Client, KIsPart} <- ClientKeys],
-    AllReplies = lists:append(L),
+    AllReplies = lists:append(call_partition_keys(<<"MGET">>, KeyIndexs, KFun)),
     % return the result in the same order with Keys
     SortedReplies = lists:sort(AllReplies),
-    {KeyIs, Replies} = lists:unzip(SortedReplies),
+    {KeyIndexs, Replies} = lists:unzip(SortedReplies),
     Replies.
 
 %% @doc set value, if the key already exists no operation is performed
@@ -354,9 +345,9 @@ not_exists_set(Key, Val) ->
 -spec multi_set(KeyVals :: [{key(), str()}]) ->
     'ok'.
 multi_set(KeyVals) ->
-    {ok, Client} = redis_manager:get_client_smode(PManager, PSType),
+    ?MUST_SINGLE,
     L = [<<"MSET">> | lists:append([[K, V] || {K, V} <- KeyVals])],
-    call(Client, mbulk_list(L)).
+    call_single_client(mbulk_list(L)).
 
 %% @doc set the respective keys to respective values, either all the
 %% key-value paires or not none at all are set.
@@ -365,9 +356,9 @@ multi_set(KeyVals) ->
 -spec multi_set_not_exists(KeyVals :: [{key(), str()}]) ->
     boolean().
 multi_set_not_exists(KeyVals) ->
-    {ok, Client} = redis_manager:get_client_smode(PManager, PSType),
+    ?MUST_SINGLE,
     L = [<<"MSETNX">> | lists:append([[K, V] || {K, V} <- KeyVals])],
-    R = call(Client, mbulk_list(L)),
+    R = call_single_client(mbulk_list(L)),
     int_may_bool(R).
 
 %% @doc increase the integer value of key
@@ -429,7 +420,6 @@ list_len(Key) ->
 -spec list_range(Key :: key(), Start :: index(), End :: index()) ->
     [value()].
 list_range(Key, Start, End) ->
-    % ??
     call_key(Key, mbulk(<<"LRANGE">>, Key, ?N2S(Start), ?N2S(End))).
 
 %% @doc trim an existing list, it will contains the elements specified by 
@@ -498,8 +488,26 @@ list_pop_tail(Key) ->
 -spec list_tail_to_head(SrcKey :: key(), DstKey :: key()) ->
     'ok'.
 list_tail_to_head(SrcKey, DstKey) ->
-    {ok, Client} = redis_manager:get_client_smode(PManager, PSType),
-    call(Client, mbulk(<<"RPOPLPUSH">>, SrcKey, DstKey)).
+    ?MUST_SINGLE,
+    call_single_client(mbulk(<<"RPOPLPUSH">>, SrcKey, DstKey)).
+
+%% @doc blocking list_pop_head
+%% O(1)
+-spec list_block_pop_head([key()], timeout()) ->
+    value().
+list_block_pop_head(Keys, Timeout) ->
+    ?MUST_SINGLE,
+    TimeStr = ?N2S(timeout_val(Timeout)),
+    call_single_client(mbulk([<<"BLPOP">> | Keys ++ [TimeStr]])).
+
+%% @doc blocking list_pop_tail
+%% O(1)
+-spec list_block_pop_tail([key()], timeout()) ->
+    value().
+list_block_pop_tail(Keys, Timeout) ->
+    ?MUST_SINGLE,
+    TimeStr = ?N2S(timeout_val(Timeout)),
+    call_single_client(mbulk([<<"LRPOP">> | Keys ++ [TimeStr]])).
 
 %%------------------------------------------------------------------------------
 %% set commands (in set all members is distinct)
@@ -533,8 +541,8 @@ set_pop(Key) ->
 -spec set_move(Src :: key(), Dst :: key(), Mem :: str()) ->
     boolean().
 set_move(Src, Dst, Mem) ->
-    {ok, Client} = redis_manager:get_client_smode(PManager, PSType),
-    R = call(Client, mbulk(<<"SMOVE">>, Src, Dst, Mem)),
+    ?MUST_SINGLE,
+    R = call_key(Src, mbulk(<<"SMOVE">>, Src, Dst, Mem)),
     int_may_bool(R).
 
 %% @doc return the number of elements in set
@@ -558,16 +566,16 @@ set_is_member(Key, Mem) ->
 -spec set_inter(Keys :: [key()]) ->
     [value()].
 set_inter(Keys) ->
-    {ok, Client} = redis_manager:get_client_smode(PManager, PSType),
-    call(Client, mbulk_list([<<"SINTER">> | Keys])).
+    ?MUST_SINGLE,
+    call_single_client(mbulk_list([<<"SINTER">> | Keys])).
 
 %% @doc compute the intersection between the sets and save the 
 %% resulting to new set
 -spec set_inter_store(Dst :: key(), Keys :: [key()]) ->
     'ok' | error().
 set_inter_store(Dst, Keys) ->
-    {ok, Client} = redis_manager:get_client_smode(PManager, PSType),
-    call(Client, mbulk_list([<<"SINTERSTORE">>, Dst | Keys])).
+    ?MUST_SINGLE,
+    call_single_client(mbulk_list([<<"SINTERSTORE">>, Dst | Keys])).
 
 %% @doc  return the union of all the sets
 %% NOTE: MUST single mode
@@ -575,8 +583,8 @@ set_inter_store(Dst, Keys) ->
 -spec set_union(Keys :: [key()]) ->
     [value()].
 set_union(Keys) ->
-    {ok, Client} = redis_manager:get_client_smode(PManager, PSType),
-    call(Client, mbulk_list([<<"SUNION">> | Keys])).
+    ?MUST_SINGLE,
+    call_single_client(mbulk_list([<<"SUNION">> | Keys])).
 
 %% @doc compute the union between the sets and save the 
 %% resulting to new set
@@ -585,8 +593,8 @@ set_union(Keys) ->
 -spec set_union_store(Dst :: key(), Keys :: [key()]) ->
     'ok' | error().
 set_union_store(Dst, Keys) ->
-    {ok, Client} = redis_manager:get_client_smode(PManager, PSType),
-    call(Client, mbulk_list([<<"SUNIONSTORE">>, Dst | Keys])).
+    ?MUST_SINGLE,
+    call_single_client(mbulk_list([<<"SUNIONSTORE">>, Dst | Keys])).
 
 %% @doc return the difference between the First set and all the other sets
 %% NOTE: MUST single mode
@@ -594,8 +602,8 @@ set_union_store(Dst, Keys) ->
 -spec set_diff(First :: key(), Keys :: [key()]) ->
     [value()].
 set_diff(First, Keys) ->
-    {ok, Client} = redis_manager:get_client_smode(PManager, PSType),
-    call(Client, mbulk_list([<<"SDIFF">>, First | Keys])).
+    ?MUST_SINGLE,
+    call_single_client(mbulk_list([<<"SDIFF">>, First | Keys])).
 
 %% @doc compute the difference between the sets and save the 
 %% resulting to new set
@@ -604,8 +612,8 @@ set_diff(First, Keys) ->
 -spec set_diff_store(Dst :: key(), First :: key(), Keys :: [key()]) ->
     'ok' | error().
 set_diff_store(Dst, First, Keys) ->
-    {ok, Client} = redis_manager:get_client_smode(PManager, PSType),
-    call(Client, mbulk_list([<<"SDIFFSTORE">>, Dst, First | Keys])).  
+    ?MUST_SINGLE,
+    call_single_client(mbulk_list([<<"SDIFFSTORE">>, Dst, First | Keys])).  
 
 %% @doc return all the members in the set
 %% O(1)
@@ -794,35 +802,33 @@ hash_exists(Key, Field) ->
 
 %% @doc return the number of items in hash
 %% O(1)
--spec hash_len(Key :: key()) ->
-    integer().
+-spec hash_len(Key :: key()) -> integer().
 hash_len(Key) ->
     call_key(Key, mbulk(<<"HLEN">>, Key)).
 
 %% @doc return all the fields in hash
 %% O(n)
--spec hash_keys(Key :: key()) ->
-    [value()].
+-spec hash_keys(Key :: key()) -> [value()].
 hash_keys(Key) ->
     call_key(Key, mbulk(<<"HKEYS">>, Key)).
 
 %% @doc return all the values in hash
--spec hash_vals(Key :: key()) ->
-    [value()].
+-spec hash_vals(Key :: key()) -> [value()].
 hash_vals(Key) ->
     call_key(Key, mbulk(<<"HVALS">>, Key)).
 
 %% @doc return a tuple list include both the fields and values in hash
+-spec hash_all(key()) -> [tuple()].
 hash_all(Key) ->
     KFList = call_key(Key, mbulk(<<"HGETALL">>, Key)),
     list_to_kv_tuple(KFList).
+
 %%------------------------------------------------------------------------------
 %% sort commands
 %%------------------------------------------------------------------------------
 
 %% @doc sort a list or set accordingly to the parameters
--spec sort(Key :: key(), SortOpt :: redis_sort()) ->
-    list().
+-spec sort(Key :: key(), SortOpt :: redis_sort()) -> list().
 sort(Key, SortOpt) ->
     #redis_sort{
         by_pat = By,
@@ -892,11 +898,11 @@ sort(Key, SortOpt) ->
 %%------------------------------------------------------------------------------
 
 %% @doc transaction begin
--spec trans_begin() ->
-    trans_handler() | {'error', any()}.
-trans_begin() ->
-    {ok, Client} = redis_manager:get_client_smode(PManager, PSType),
-    case call(Client, mbulk(<<"MULTI">>)) of
+-spec trans_begin() -> trans_handler() | {'error', any()}.
+trans_begin() when PContext =:= ?CONTEXT_NORMAL ->
+    ?MUST_SINGLE,
+    {ok, [Client]} = redis_manager:get_clients(PManager),
+    case redis_client:send(Client, mbulk(<<"MULTI">>)) of
         ok ->
             redis_app:trans_handler(PManager, PGroup, PSType, Client);
         E ->
@@ -904,16 +910,15 @@ trans_begin() ->
     end.
 
 %% @doc transaction commit
--spec trans_commit() ->
-    [any()].
-trans_commit() when PClient =/= ?PCLIENT_NULL ->
-    call(PClient, mbulk(<<"EXEC">>)).
+-spec trans_commit() -> [any()].
+trans_commit() when PContext =:= ?CONTEXT_TRANS ->
+    redis_client:send(PClient, mbulk(<<"EXEC">>)).
 
 %% @doc transaction discard
 -spec trans_abort() ->
     'ok'.
-trans_abort() when PClient =/= ?PCLIENT_NULL ->
-    call(PClient, mbulk(<<"DISCARD">>)).
+trans_abort() when PContext =:= ?CONTEXT_TRANS ->
+    redis_client:send(PClient, mbulk(<<"DISCARD">>)).
 
 %%------------------------------------------------------------------------------
 %% persistence commands 
@@ -968,37 +973,41 @@ info() ->
 %%
 %%------------------------------------------------------------------------------
 
-%% send the command 
-call(Client, Cmd) ->
-    redis_client:send(Client, Cmd).
+%% get sorted set range by index
+do_zset_range_index(Cmd, Key, Start, End, WithScore) ->
+    case WithScore of
+        true ->
+            L = call_key(Key, mbulk_list([Cmd, Key, ?N2S(Start), ?N2S(End), <<"WITHSCORES">>])),
+            list_to_kv_tuple(L, fun(S) -> string_to_score(S) end);
+        false ->
+            call_key(Key, mbulk(Cmd, Key, ?N2S(Start), ?N2S(End)))
+    end.
 
 %% do the call to the server the key belong to
-call_key(_Key, Cmd) when PClient =/= ?PCLIENT_NULL -> % in trans mode
-    redis_client:send(PClient, Cmd);
-call_key(Key, Cmd) -> % in normal mode
+call_key(Key, Cmd) when PContext =:= ?CONTEXT_NORMAL ->
     {ok, Client} = redis_manager:get_client(PManager, Key),
-    redis_client:send(Client, Cmd).
+    redis_client:send(Client, Cmd);
+call_key(_Key, Cmd) when PContext =:= ?CONTEXT_TRANS ->
+    ?MUST_SINGLE,
+    redis_client:send(PClient, Cmd).
+
+%% do the call to the single client for single server mode
+call_single_client(Cmd) when PContext =:= ?CONTEXT_NORMAL ->
+    {ok, [Client]} = redis_manager:get_clients(PManager),
+    redis_client:send(Client, Cmd);
+call_single_client(Cmd) when PContext =:= ?CONTEXT_TRANS ->
+    redis_client:send(PClient, Cmd).
 
 %% do the call to the all servers 
-%% single, normal mode
-call_clients(Cmd) when PSType =:= single,
-                        PClient =:= ?PCLIENT_NULL ->
+call_clients(Cmd) when PContext =:= ?CONTEXT_NORMAL ->
     {ok, Clients} = redis_manager:get_clients(PManager),
     redis_client:multi_send(Clients, Cmd);
-%% single, trans mode
-call_clients(Cmd) when PSType =:= single,
-                        PClient =/= ?PCLIENT_NULL ->
-    redis_client:multi_send([PClient], Cmd);
-%% multi, normal mode
-call_clients(Cmd) when PClient =:= ?PCLIENT_NULL ->
-    {ok, Clients} = redis_manager:get_clients(PManager),
-    redis_client:multi_send(Clients, Cmd);
-%% multi, trans mode, oops error!
-call_clients(_Cmd) when PClient =/= ?PCLIENT_NULL ->
-    throw({error, in_trans_mode}).
+call_clients(Cmd) when PContext =:= ?CONTEXT_TRANS ->
+    ?MUST_SINGLE,
+    redis_client:multi_send([PClient], Cmd).
 
 %% do the call to any one server
-call_any(Cmd, F) when PClient =:= ?PCLIENT_NULL ->
+call_any(Cmd, F) when PContext =:= ?CONTEXT_NORMAL ->
     {ok, Clients} = redis_manager:get_clients(PManager),
     ?DEBUG2("call any send cmd ~p by clients:~p", [Cmd, Clients]),
     [V | _] =
@@ -1011,17 +1020,34 @@ call_any(Cmd, F) when PClient =:= ?PCLIENT_NULL ->
                 Ret
         end
     end || Client <- Clients],
-    V.
+    V;
+call_any(Cmd, _F) when PContext =:= ?CONTEXT_TRANS ->
+    ?MUST_SINGLE,
+    redis_client:send(PClient, Cmd).
 
-%% get sorted set range by index
-do_zset_range_index(Cmd, Key, Start, End, WithScore) ->
-    case WithScore of
-        true ->
-            L = call_key(Key, mbulk_list([Cmd, Key, ?N2S(Start), ?N2S(End), <<"WITHSCORES">>])),
-            list_to_kv_tuple(L, fun(S) -> string_to_score(S) end);
-        false ->
-            call_key(Key, mbulk(Cmd, Key, ?N2S(Start), ?N2S(End)))
-    end.
+%% do the multiple keys call, partition the keys to servers
+call_partition_keys(Type, KeyList, KFun) when PContext =:= ?CONTEXT_NORMAL ->
+    ClientKeys = redis_manager:partition_keys(PManager, KeyList, KFun),
+    [begin
+        KeysPart = 
+        case KFun of
+            ?FUN_NULL ->
+                KLPart;
+            _ ->
+                [KFun(KEntry) || KEntry <- KLPart]
+        end,
+        Cmd = mbulk_list([Type | KeysPart]),
+        Replies = redis_client:send(Client, Cmd),
+        case KFun of
+            ?FUN_NULL ->
+                Replies;
+            _ ->
+                lists:zip(KLPart, Replies)
+        end
+    end || {Client, KLPart} <- ClientKeys];
+call_partition_keys(Type, KeyList, _KFun) when PContext =:= ?CONTEXT_TRANS ->
+    ?MUST_SINGLE,
+    redis_client:send(PClient, mbulk_list([Type | KeyList])).
 
 %% convert score to string
 score_to_string(S) when is_integer(S) ->
@@ -1039,6 +1065,12 @@ string_to_score(S) when is_list(S) ->
         N ->
             N
     end.
+
+%% the timeout value
+timeout_val(infinity) ->
+    0;
+timeout_val(T) when is_integer(T) ->
+    T.
 
 %% convert to boolean if the value is possible, otherwise return the value self
 int_may_bool(0) -> false;
