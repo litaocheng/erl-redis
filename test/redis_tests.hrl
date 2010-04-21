@@ -1,9 +1,3 @@
--module(redis_tests).
-
-%% Note: This directive should only be used in test suites.
--compile(export_all).
-
--include("ct.hrl").
 -include("redis_internal.hrl").
 -define(P(F, D), ?INFO2(F, D)).
     
@@ -14,27 +8,24 @@
         V
     end()).
 
-do(Config) -> 
-    Redis = ?config(redis_client, Config),
-    Version = Redis:version(),
-    io:format("client version ~p~n", [Version]),
-    test_generic(Config),
-    test_string(Config),
-    test_list(Config),
-    test_set(Config),
-    test_zset(Config),
+all_tests() ->
+    [
+        test_generic,
+        test_string,
+        test_list,
+        test_set,
+        test_zset,
+        % Redis 1.3.4
+        test_hash,
+        test_sort,
+        % Redis 1.3.4
+        test_trans,
+        test_persistence,
+        test_dummy
+    ].
 
-    % Redis 1.3.4
-    test_hash(Config),
-
-    test_sort(Config),
-
-    % Redis 1.3.4
-    test_trans(Config),
-
-    test_persistence(Config),
+test_dummy(_Config) ->
     ok.
-
 
 %% test generic commands
 test_generic(Config) ->
@@ -44,7 +35,7 @@ test_generic(Config) ->
     bool(?PF(Redis:delete("Key2"))),
     non_neg_int(?PF(Redis:multi_delete(["Key3", "key4", "key5", "key6"]))),
     atom(?PF(Redis:type("key1"))),
-    {_, _} = ?PF(Redis:keys("key*")),
+    list(?PF(Redis:keys("key*"))),
     ?PF(Redis:random_key()),
     catch ?PF(Redis:rename("key1", "key2")),
     catch ?PF(Redis:rename_not_exists("key1", "key2")),
@@ -245,17 +236,17 @@ test_trans(Config) ->
     Type = ?config(redis_type, Config),
     case Type of
         single ->
-            ?PF(Redis:trans_begin()),
-            ?PF(Redis:get("k1")),
-            ?PF(Redis:hash_get("myhash", "f2")),
-            ?PF(Redis:hash_set("myhash", "f2", "v22")),
-            ?PF(Redis:trans_commit()),
+            Trans = ?PF(Redis:trans_begin()),
+            ?PF(Trans:get("k1")),
+            ?PF(Trans:hash_get("myhash", "f2")),
+            ?PF(Trans:hash_set("myhash", "f2", "v22")),
+            ?PF(Trans:trans_commit()),
 
-            ?PF(Redis:trans_begin()),
-            ?PF(Redis:get("k1")),
-            ?PF(Redis:hash_get("myhash", "f2")),
-            ?PF(Redis:hash_set("myhash", "f2", "v22")),
-            ok = ?PF(Redis:trans_abort()),
+            Trans2 = ?PF(Redis:trans_begin()),
+            ?PF(Trans2:get("k1")),
+            ?PF(Trans2:hash_get("myhash", "f2")),
+            ?PF(Trans2:hash_set("myhash", "f2", "v22")),
+            ok = ?PF(Trans2:trans_abort()),
             ok;
         _ ->
             ok
@@ -277,8 +268,8 @@ bool(false) -> ok.
 non_neg_int(N) when is_integer(N), N >= 0 -> ok.
 
 int(N) when is_integer(N) -> ok.
-
 atom(A) when is_atom(A) -> ok.
+list(L) when is_list(L) -> ok.
 
 now_sec() ->
     {A, B, C} = now(),

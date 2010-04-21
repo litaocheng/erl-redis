@@ -9,7 +9,7 @@
 %%% @end
 %%%
 %%%----------------------------------------------------------------------
--module(redis, [Manager, Group, SType]).
+-module(redis, [PManager, PGroup, PSType, PClient]).
 -author('ltiaocheng@gmail.com').
 -vsn('0.1').
 -include("redis_internal.hrl").
@@ -69,6 +69,22 @@
 %% connection pool size
 -define(DEF_POOL, 2).
 
+-define(MULTI_REPLY(Ret),
+    case BadServers of
+        [] ->
+            Ret;
+        [_|_] ->
+            {error, Ret, BadServers}
+    end.
+-define(MULTI_REPLY_OK,
+    case BadServers of
+        [] ->
+            ok;
+        [_|_] ->
+            {error, BadServers}
+    end.
+
+
 %% @doc show stats info in the stdout
 -spec i() -> 'ok'.
 i() ->
@@ -82,17 +98,17 @@ version() ->
 %% @doc return the group info
 -spec group() -> atom().
 group() ->
-    redis_manager:group(Manager).
+    PGroup.
 
 %% @doc return the server list
 -spec server_list() -> [single_server()].
 server_list() ->
-    redis_manager:server_list(Manager).
+    redis_manager:server_list(PManager).
 
 %% @doc return the server config type
 -spec server_type() -> server_type().
 server_type() ->
-    redis_manager:server_type(Manager).
+    redis_manager:server_type(PManager).
 
 %% @doc return the currently selected db
 -spec db() -> index().
@@ -106,13 +122,8 @@ db() ->
 %% @doc ping the redis server
 -spec ping() -> 'ok' | {'error', [atom()]}.
 ping() ->
-    {_Replies, BadServers} = call_clients_one(mbulk(<<"PING">>)),
-    case BadServers of
-        [] ->
-            ok;
-        [_|_] ->
-            {error, BadServers}
-    end.
+    {_Replies, BadServers} = call_clients(mbulk(<<"PING">>)),
+    ?MULTI_REPLY_OK.
 
 %% @doc test if the specified key exists
 %% O(1)
@@ -137,7 +148,7 @@ delete(Key) ->
 -spec multi_delete(Keys :: [key()]) -> 
     non_neg_integer().
 multi_delete(Keys) ->
-    ClientKeys = redis_manager:partition_keys(Manager, Keys),
+    ClientKeys = redis_manager:partition_keys(PManager, Keys),
     ?DEBUG2("client keys is ~p", [ClientKeys]),
     L =
     [begin
@@ -158,9 +169,9 @@ type(Key) ->
 %% the bad servers.
 %% O(n)
 -spec keys(Pattern :: pattern()) -> 
-    {[key()], [atom()]}.
+    [key()] | {'error', [key()], [atom()]}.
 keys(Pattern) ->
-    {Replies, BadServers} = call_clients_one(mbulk(<<"KEYS">>, Pattern)),
+    {Replies, BadServers} = call_clients(mbulk(<<"KEYS">>, Pattern)),
     KeyL = 
     lists:foldl(
         fun({_Server, null}, Acc) ->
@@ -169,8 +180,8 @@ keys(Pattern) ->
                 [R | Acc]
         end,
     [], Replies),
-    {lists:append(KeyL), BadServers}.
-
+    Keys = lists:append(KeyL),
+    ?MULTI_REPLY(Keys).
 
 %% @doc return a randomly selected key from the currently selected DB
 %% O(1)
@@ -192,7 +203,7 @@ random_key() ->
 -spec rename(OldKey :: key(), NewKey :: key()) -> 
     'ok'.
 rename(OldKey, NewKey) ->
-    {ok, Client} = redis_manager:get_client_smode(Manager, SType),
+    {ok, Client} = redis_manager:get_client_smode(PManager, PSType),
     call(Client, mbulk(<<"RENAME">>, OldKey, NewKey)).
 
 %% @doc  rename oldkey into newkey  but fails if the destination key newkey already exists. 
@@ -201,7 +212,7 @@ rename(OldKey, NewKey) ->
 -spec rename_not_exists(OldKey :: key(), NewKey :: key()) -> 
     boolean().
 rename_not_exists(OldKey, NewKey) ->
-    {ok, Client} = redis_manager:get_client_smode(Manager, SType),
+    {ok, Client} = redis_manager:get_client_smode(PManager, PSType),
     R = call(Client, mbulk(<<"RENAMENX">>, OldKey, NewKey)),
     int_may_bool(R).
 
@@ -210,14 +221,15 @@ rename_not_exists(OldKey, NewKey) ->
 -spec dbsize() -> 
     {integer() , [inet_server()]}.
 dbsize() ->
-    {Replies, BadServers} = call_clients_one(mbulk(<<"DBSIZE">>)),
+    {Replies, BadServers} = call_clients(mbulk(<<"DBSIZE">>)),
     Size = 
     lists:foldl(
         fun({_Server, R}, Acc) ->
             R + Acc
         end,
     0, Replies),
-    {Size, BadServers}.
+    ?MULTI_REPLY(Size).
+
 
 %% @doc set a timeout on the specified key, after the Time the Key will
 %% automatically deleted by server.
@@ -249,10 +261,10 @@ ttl(Key) ->
 -spec select(Index :: index()) ->
     'ok' | {'error', [inet_server()]}.
 select(Index) ->
-    {_Replies, BadServers} = call_clients_one(mbulk(<<"PING">>)),
+    {_Replies, BadServers} = call_clients(mbulk(<<"PING">>)),
     case BadServers of
         [] ->
-            redis_manager:set_selected_db(Manager, Index);
+            redis_manager:set_selected_db(PManager, Index);
         [_|_] ->
             {error, BadServers}
     end.
@@ -263,30 +275,20 @@ select(Index) ->
 -spec move(Key :: key(), DBIndex :: index()) ->
     boolean().
 move(Key, DBIndex) ->
-    {ok, Client} = redis_manager:get_client_smode(Manager, SType),
+    {ok, Client} = redis_manager:get_client_smode(PManager, PSType),
     R = call(Client, mbulk(<<"MOVE">>, Key, ?N2S(DBIndex))),
     int_may_bool(R).
 
 %% @doc delete all the keys of the currently selected DB
 -spec flush_db() -> 'ok' | {'error', [atom()]}.
 flush_db() ->
-    {_Replies, BadServers} = call_clients_one(mbulk(<<"FLUSHDB">>)),
-    case BadServers of
-        [] ->
-            ok;
-        [_|_] ->
-            {error, BadServers}
-    end.
+    {_Replies, BadServers} = call_clients(mbulk(<<"FLUSHDB">>)),
+    ?MULTI_REPLY_OK.
             
 -spec flush_all() -> 'ok' | {'error', [atom()]}.
 flush_all() ->
-    {_Replies, BadServers} = call_clients_one(mbulk(<<"FLUSHALL">>)),
-    case BadServers of
-        [] ->
-            ok;
-        [_|_] ->
-            {error, BadServers}
-    end.
+    {_Replies, BadServers} = call_clients(mbulk(<<"FLUSHALL">>)),
+    ?MULTI_REPLY_OK.
 
 %%------------------------------------------------------------------------------
 %% string commands 
@@ -321,7 +323,7 @@ multi_get(Keys) ->
     Len = length(Keys),
     KeyIs = lists:zip(lists:seq(1, Len), Keys),
     KFun = fun({_Index, K}) -> K end,
-    ClientKeys = redis_manager:partition_keys(Manager, KeyIs, KFun),
+    ClientKeys = redis_manager:partition_keys(PManager, KeyIs, KFun),
     ?DEBUG2("get client keys partions is ~p", [ClientKeys]),
 
     L =
@@ -352,7 +354,7 @@ not_exists_set(Key, Val) ->
 -spec multi_set(KeyVals :: [{key(), str()}]) ->
     'ok'.
 multi_set(KeyVals) ->
-    {ok, Client} = redis_manager:get_client_smode(Manager, SType),
+    {ok, Client} = redis_manager:get_client_smode(PManager, PSType),
     L = [<<"MSET">> | lists:append([[K, V] || {K, V} <- KeyVals])],
     call(Client, mbulk_list(L)).
 
@@ -363,7 +365,7 @@ multi_set(KeyVals) ->
 -spec multi_set_not_exists(KeyVals :: [{key(), str()}]) ->
     boolean().
 multi_set_not_exists(KeyVals) ->
-    {ok, Client} = redis_manager:get_client_smode(Manager, SType),
+    {ok, Client} = redis_manager:get_client_smode(PManager, PSType),
     L = [<<"MSETNX">> | lists:append([[K, V] || {K, V} <- KeyVals])],
     R = call(Client, mbulk_list(L)),
     int_may_bool(R).
@@ -496,7 +498,7 @@ list_pop_tail(Key) ->
 -spec list_tail_to_head(SrcKey :: key(), DstKey :: key()) ->
     'ok'.
 list_tail_to_head(SrcKey, DstKey) ->
-    {ok, Client} = redis_manager:get_client_smode(Manager, SType),
+    {ok, Client} = redis_manager:get_client_smode(PManager, PSType),
     call(Client, mbulk(<<"RPOPLPUSH">>, SrcKey, DstKey)).
 
 %%------------------------------------------------------------------------------
@@ -531,7 +533,7 @@ set_pop(Key) ->
 -spec set_move(Src :: key(), Dst :: key(), Mem :: str()) ->
     boolean().
 set_move(Src, Dst, Mem) ->
-    {ok, Client} = redis_manager:get_client_smode(Manager, SType),
+    {ok, Client} = redis_manager:get_client_smode(PManager, PSType),
     R = call(Client, mbulk(<<"SMOVE">>, Src, Dst, Mem)),
     int_may_bool(R).
 
@@ -556,7 +558,7 @@ set_is_member(Key, Mem) ->
 -spec set_inter(Keys :: [key()]) ->
     [value()].
 set_inter(Keys) ->
-    {ok, Client} = redis_manager:get_client_smode(Manager, SType),
+    {ok, Client} = redis_manager:get_client_smode(PManager, PSType),
     call(Client, mbulk_list([<<"SINTER">> | Keys])).
 
 %% @doc compute the intersection between the sets and save the 
@@ -564,7 +566,7 @@ set_inter(Keys) ->
 -spec set_inter_store(Dst :: key(), Keys :: [key()]) ->
     'ok' | error().
 set_inter_store(Dst, Keys) ->
-    {ok, Client} = redis_manager:get_client_smode(Manager, SType),
+    {ok, Client} = redis_manager:get_client_smode(PManager, PSType),
     call(Client, mbulk_list([<<"SINTERSTORE">>, Dst | Keys])).
 
 %% @doc  return the union of all the sets
@@ -573,7 +575,7 @@ set_inter_store(Dst, Keys) ->
 -spec set_union(Keys :: [key()]) ->
     [value()].
 set_union(Keys) ->
-    {ok, Client} = redis_manager:get_client_smode(Manager, SType),
+    {ok, Client} = redis_manager:get_client_smode(PManager, PSType),
     call(Client, mbulk_list([<<"SUNION">> | Keys])).
 
 %% @doc compute the union between the sets and save the 
@@ -583,7 +585,7 @@ set_union(Keys) ->
 -spec set_union_store(Dst :: key(), Keys :: [key()]) ->
     'ok' | error().
 set_union_store(Dst, Keys) ->
-    {ok, Client} = redis_manager:get_client_smode(Manager, SType),
+    {ok, Client} = redis_manager:get_client_smode(PManager, PSType),
     call(Client, mbulk_list([<<"SUNIONSTORE">>, Dst | Keys])).
 
 %% @doc return the difference between the First set and all the other sets
@@ -592,7 +594,7 @@ set_union_store(Dst, Keys) ->
 -spec set_diff(First :: key(), Keys :: [key()]) ->
     [value()].
 set_diff(First, Keys) ->
-    {ok, Client} = redis_manager:get_client_smode(Manager, SType),
+    {ok, Client} = redis_manager:get_client_smode(PManager, PSType),
     call(Client, mbulk_list([<<"SDIFF">>, First | Keys])).
 
 %% @doc compute the difference between the sets and save the 
@@ -602,7 +604,7 @@ set_diff(First, Keys) ->
 -spec set_diff_store(Dst :: key(), First :: key(), Keys :: [key()]) ->
     'ok' | error().
 set_diff_store(Dst, First, Keys) ->
-    {ok, Client} = redis_manager:get_client_smode(Manager, SType),
+    {ok, Client} = redis_manager:get_client_smode(PManager, PSType),
     call(Client, mbulk_list([<<"SDIFFSTORE">>, Dst, First | Keys])).  
 
 %% @doc return all the members in the set
@@ -891,24 +893,27 @@ sort(Key, SortOpt) ->
 
 %% @doc transaction begin
 -spec trans_begin() ->
-    'ok'.
+    trans_handler() | {'error', any()}.
 trans_begin() ->
-    {ok, Client} = redis_manager:get_client_smode(Manager, SType),
-    call(Client, mbulk(<<"MULTI">>)).
+    {ok, Client} = redis_manager:get_client_smode(PManager, PSType),
+    case call(Client, mbulk(<<"MULTI">>)) of
+        ok ->
+            redis_app:trans_handler(PManager, PGroup, PSType, Client);
+        E ->
+            {error, E}
+    end.
 
 %% @doc transaction commit
 -spec trans_commit() ->
     [any()].
-trans_commit() ->
-    {ok, Client} = redis_manager:get_client_smode(Manager, SType),
-    call(Client, mbulk(<<"EXEC">>)).
+trans_commit() when PClient =/= ?PCLIENT_NULL ->
+    call(PClient, mbulk(<<"EXEC">>)).
 
 %% @doc transaction discard
 -spec trans_abort() ->
     'ok'.
-trans_abort() ->
-    {ok, Client} = redis_manager:get_client_smode(Manager, SType),
-    call(Client, mbulk(<<"DISCARD">>)).
+trans_abort() when PClient =/= ?PCLIENT_NULL ->
+    call(PClient, mbulk(<<"DISCARD">>)).
 
 %%------------------------------------------------------------------------------
 %% persistence commands 
@@ -917,41 +922,32 @@ trans_abort() ->
 %% @doc synchronously save the DB on disk
 -spec save() -> 'ok' | error().
 save() ->
-    {_Replies, BadServers} = call_clients_one(mbulk(<<"SAVE">>)),
-    case BadServers of
-        [] ->
-            ok;
-        [_|_] ->
-            {error, BadServers}
-    end.
+    {_Replies, BadServers} = call_clients(mbulk(<<"SAVE">>)),
+    ?MULTI_REPLY_OK.
 
 %% @doc save the DB in background
 -spec bg_save() -> 'ok' | error().
 bg_save() ->
-    {_Replies, BadServers} = call_clients_one(mbulk(<<"BGSAVE">>)),
-    case BadServers of
-        [] ->
-            ok;
-        [_|_] ->
-            {error, BadServers}
-    end.
+    {_Replies, BadServers} = call_clients(mbulk(<<"BGSAVE">>)),
+    ?MULTI_REPLY_OK.
 
 %% @doc return the UNIX time that the last DB save excuted with success
--spec lastsave_time() -> [{atom(), timestamp()}].
+-spec lastsave_time() -> timestamp() | [{atom(), timestamp()}].
 lastsave_time() ->
-    {Replies, _BadServers} = call_clients_one(mbulk(<<"LASTSAVE">>)),
-    Replies.
+    {Replies, _BadServers} = call_clients(mbulk(<<"LASTSAVE">>)),
+    case PSType of
+        single ->
+            [{_, Time}] = Replies,
+            Time;
+        _ ->
+            Replies
+    end.
 
 %% @doc rewrite the append only log in background
 -spec bg_rewrite_aof() -> 'ok' | error().
 bg_rewrite_aof() ->
-    {_Replies, BadServers} = call_clients_one(mbulk(<<"BGREWRITEAOF">>)),
-    case BadServers of
-        [] ->
-            ok;
-        [_|_] ->
-            {error, BadServers}
-    end.
+    {_Replies, BadServers} = call_clients(mbulk(<<"BGREWRITEAOF">>)),
+    ?MULTI_REPLY_OK.
 
 %%------------------------------------------------------------------------------
 %% remote server control commands 
@@ -959,12 +955,12 @@ bg_rewrite_aof() ->
 %% @doc return the info about the server
 -spec info() -> [{atom(), value()}].
 info() ->
-    {Replies, _BadServers} = call_clients_one(mbulk(<<"INFO">>)),
+    {Replies, _BadServers} = call_clients(mbulk(<<"INFO">>)),
     Replies.
 
 %% @doc unknown commands
-command(Args) ->
-    [].
+%command(Args) ->
+%    [].
 
 %%------------------------------------------------------------------------------
 %%
@@ -977,25 +973,33 @@ call(Client, Cmd) ->
     redis_client:send(Client, Cmd).
 
 %% do the call to the server the key belong to
-call_key(Key, Cmd) ->
-    {ok, Client} = redis_manager:get_client(Manager, Key),
+call_key(_Key, Cmd) when PClient =/= ?PCLIENT_NULL -> % in trans mode
+    redis_client:send(PClient, Cmd);
+call_key(Key, Cmd) -> % in normal mode
+    {ok, Client} = redis_manager:get_client(PManager, Key),
     redis_client:send(Client, Cmd).
 
-%% do the call to one connection with all servers 
-call_clients_one(Cmd) ->
-    {ok, Clients} = redis_manager:get_clients_one(Manager),
-    ?DEBUG2("call clients one : ~p~ncmd :~p", [Clients, Cmd]),
-    redis_client:multi_send(Clients, Cmd).
-
-%% do the call to all the connections with all servers
-%call_clients_all(Cmd) ->
-%    {ok, Clients} = redis_manager:get_clients_all(Manager),
-%    ?DEBUG2("call clients all :~p~ncmd :~p", [Clients, Cmd]),
-%    redis_client:multi_send(Clients, Cmd).
+%% do the call to the all servers 
+%% single, normal mode
+call_clients(Cmd) when PSType =:= single,
+                        PClient =:= ?PCLIENT_NULL ->
+    {ok, Clients} = redis_manager:get_clients(PManager),
+    redis_client:multi_send(Clients, Cmd);
+%% single, trans mode
+call_clients(Cmd) when PSType =:= single,
+                        PClient =/= ?PCLIENT_NULL ->
+    redis_client:multi_send([PClient], Cmd);
+%% multi, normal mode
+call_clients(Cmd) when PClient =:= ?PCLIENT_NULL ->
+    {ok, Clients} = redis_manager:get_clients(PManager),
+    redis_client:multi_send(Clients, Cmd);
+%% multi, trans mode, oops error!
+call_clients(_Cmd) when PClient =/= ?PCLIENT_NULL ->
+    throw({error, in_trans_mode}).
 
 %% do the call to any one server
-call_any(Cmd, F) ->
-    {ok, Clients} = redis_manager:get_clients_one(Manager),
+call_any(Cmd, F) when PClient =:= ?PCLIENT_NULL ->
+    {ok, Clients} = redis_manager:get_clients(PManager),
     ?DEBUG2("call any send cmd ~p by clients:~p", [Cmd, Clients]),
     [V | _] =
     [begin

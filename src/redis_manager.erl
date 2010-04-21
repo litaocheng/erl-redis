@@ -17,7 +17,7 @@
 -export([start/3, start_link/3]).
 -export([set_selected_db/2]).
 -export([server_list/1, server_type/1]).
--export([get_client_smode/2, get_client/2, get_clients_one/1, get_clients_all/1]).
+-export([get_client_smode/2, get_client/2, get_clients/1]).
 -export([partition_keys/2, partition_keys/3]).
 
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -89,19 +89,11 @@ get_client(Mgr, Key) ->
     {ok, redis_client:to_regname(Host, Port, random:uniform(PoolSize))}.
 
 %% @doc pick up one connection from the connection pool for each server
--spec get_clients_one(atom()) -> [atom()].
-get_clients_one(Mgr) ->
+-spec get_clients(atom()) -> [atom()].
+get_clients(Mgr) ->
     {ok, Servers} = get_server(Mgr, all),
     {ok, 
     [redis_client:to_regname(Host, Port, random:uniform(PoolSize))
-        || {Host, Port, PoolSize} <- Servers]}.
-
-%% @doc get all connections in the conncetion pool for all servers
--spec get_clients_all(atom()) -> [atom()].
-get_clients_all(Mgr) ->
-    {ok, Servers} = get_server(Mgr, all),
-    {ok, 
-    [[redis_client:to_regname(Host, Port, I) || I <- lists:seq(1, PoolSize)]
         || {Host, Port, PoolSize} <- Servers]}.
 
 %% @doc partition the keys according to the servers mode

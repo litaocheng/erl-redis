@@ -67,11 +67,13 @@ send(Client, Data) ->
 -spec multi_send(Clients :: [pid()], Data :: iolist()) ->
     {[{pid(), any()}], [pid()]}.
 multi_send(Clients, Data) when is_list(Clients) ->
+    ?DEBUG2("multi_send ~p to ~p", [Data, Clients]),
     do_multi_send(Clients, {command, Data}, infinity).
 
 -spec multi_send(Clients :: [pid()], Data :: iolist(), Timeout :: timeout()) ->
     {[{pid(), any()}], [pid()]}.
 multi_send(Clients, Data, Timeout) when is_list(Clients) ->
+    ?DEBUG2("multi_send ~p to ~p", [Data, Clients]),
     do_multi_send(Clients, {command, Data}, Timeout).
 
 %%

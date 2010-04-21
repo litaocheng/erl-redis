@@ -20,11 +20,11 @@
 -export([dist_server/1, dist_server/2]).
 -export([group_server/4]).
 -export([client/1, client/2]).
+-export([trans_handler/4]).
 
 -export([start/2, stop/1]).
 -export([init/1]).
 
--define(GROUP_DEFAULT, '$default').
 
 -spec start() -> 'ok' | {'error', any()}.
 start() ->
@@ -46,7 +46,7 @@ single_server(Host, Port, Pool) when Pool >= ?CONN_POOL_MIN,
         Pool :: pos_integer(), Passwd :: passwd()) ->
     'ok' | {'error', 'already_started'}.
 single_server(Host, Port, Pool, Passwd) ->
-    start_manager(?GROUP_DEFAULT, {single, {Host, Port, Pool}}, Passwd).
+    start_manager(?PGROUP_DEFAULT, {single, {Host, Port, Pool}}, Passwd).
 
 -spec dist_server(Servers :: [single_server()]) ->
     'ok' | {'error', 'already_started'}.
@@ -56,7 +56,7 @@ dist_server(Servers) ->
 -spec dist_server(Servers :: [single_server()], Passwd :: passwd()) ->
     'ok' | {'error', 'already_started'}.
 dist_server(Servers, Passwd) ->
-    start_manager(?GROUP_DEFAULT, {dist, redis_dist:new(Servers)}, Passwd).
+    start_manager(?PGROUP_DEFAULT, {dist, redis_dist:new(Servers)}, Passwd).
 
 group_server(Group, Type, Server, Pwd) ->
     Mode = 
@@ -70,15 +70,22 @@ group_server(Group, Type, Server, Pwd) ->
 
 -spec client(server_type()) -> tuple().
 client(Type) ->
-    redis:new(manager_name(?GROUP_DEFAULT, Type),
-        ?GROUP_DEFAULT,
-        Type).
+    redis:new(manager_name(?PGROUP_DEFAULT, Type),
+        ?PGROUP_DEFAULT,
+        Type,
+        ?PCLIENT_NULL).
 
 -spec client(group(), server_type()) -> tuple().
 client(Group, Type) ->
     redis:new(manager_name(Group, Type),
         Group, 
-        Type).
+        Type,
+        ?PCLIENT_NULL).
+
+-spec trans_handler(atom(), group(), server_type(), atom()) ->
+    tuple().
+trans_handler(Mgr, Group, Type, Client) ->
+    redis:new(Mgr, Group, Type, Client).
 
 %% start the redis server manager
 start_manager(Group, {Type, _} = Mode, Passwd) ->

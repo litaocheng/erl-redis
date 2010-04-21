@@ -38,6 +38,10 @@
 -define(CRLF, "\r\n").
 -define(CRLF_BIN, <<"\r\n">>).
 
+%% for redis module paramters
+-define(PGROUP_DEFAULT, '$default').
+-define(PCLIENT_NULL, '$null').
+
 %% the redis supervisor name
 -define(REDIS_SUP, redis_sup).
 -define(MANAGER_BASE, "redis_manager").
@@ -81,5 +85,7 @@
 -type server_info() ::  single_server() | dist_server().
 -type server_type() :: 'undefined' | 'single' | 'dist'.
 -type mode_info() :: {'single', single_server()} | {'dist', dist_server()}.
+
+-type trans_handler() :: atom().
 
 -endif. % REDIS_INTERNAL_HRL
