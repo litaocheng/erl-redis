@@ -45,9 +45,12 @@
         zset_rm_by_index/3, zset_rm_by_score/3, zset_len/1, zset_score/2, 
         zset_union/1, zset_inter/1]).
 
+
 %% hash commands
--export([hash_set/3, hash_get/2, hash_del/2, hash_exists/2, hash_len/1, hash_keys/1,
-        hash_vals/1, hash_all/1]).
+-export([hash_set/3, hash_set_not_exists/3, hash_multi_set/2,
+        hash_get/2, hash_multi_get/2, 
+        hash_incr/3, hash_del/2, hash_exists/2, hash_len/1, 
+        hash_keys/1, hash_vals/1, hash_all/1]).
 
 %% sort commands
 -export([sort/2]).
@@ -649,7 +652,7 @@ zset_rm(Key, Mem) ->
     R = call_key(Key, mbulk(<<"ZREM">>, Key, Mem)),
     int_may_bool(R).
 
-%% @doc If the member already exists increment its score, 
+%% @doc If the member already exists increase its score, 
 %% otherwise add the member setting N as score
 %% O(log(N))
 -spec zset_incr(Key :: key(), Mem :: str(), N :: integer()) ->
@@ -771,22 +774,56 @@ zset_inter(_) ->
 
 %% @doc set specified hash filed with Val
 %% O(1)
--spec hash_set(Key :: key(), Field :: key(), Val :: str()) ->
+-spec hash_set(Key :: key(), field(), Val :: str()) ->
     boolean().
 hash_set(Key, Field, Val) ->
     R = call_key(Key, mbulk(<<"HSET">>, Key, Field, Val)),
     int_may_bool(R).
 
+%% @doc set specified hash filed with Val, 
+%% if the field exist no operation is performed
+%% O(1)
+-spec hash_set_not_exists(key(), field(), str()) -> boolean().
+hash_set_not_exists(Key, Field, Val) ->
+    R = call_key(Key, mbulk(<<"HSETNX">>, Key, Field, Val)),
+    int_may_bool(R).
+
+
+%% @doc set the hash fileds with the respective values,
+%%  if hash not exists, a new one will create
+%% O(N)
+-spec hash_multi_set(key(), [{field(), str()}]) -> 'ok'.
+hash_multi_set(Key, FieldVals) ->
+    L = [<<"HMSET">>, Key | lists:append([[F, V] || {F, V} <- FieldVals])],
+    call_key(Key, mbulk_list(L)).
+
 %% @doc retrieve the value of the specified hash field
 %% O(1)
--spec hash_get(Key :: key(), Field :: key()) ->
+-spec hash_get(Key :: key(), Field :: field()) ->
     value().
 hash_get(Key, Field) ->
     call_key(Key, mbulk(<<"HGET">>, Key, Field)).
 
+
+%% @doc get the values of all specified fields
+%% O(1)
+-spec hash_multi_get(key(), [field()]) ->
+    [value() | 'null'].
+hash_multi_get(Key, Fields) ->
+    call_key(Key, mbulk_list([<<"HMGET">>, Key | Fields])).
+
+
+%% @doc If the field already exists increase its score, 
+%% otherwise add the field with N as score
+%% O(log(N))
+-spec hash_incr(key(), field(), integer()) ->
+    score().
+hash_incr(Key, Field, N) ->
+    call_key(Key, mbulk(<<"HINCRBY">>, Key, Field, ?N2S(N))).
+
 %% @doc remove the sepcified field from the hash
 %% O(1)
--spec hash_del(Key :: key(), Field :: key()) ->
+-spec hash_del(Key :: key(), Field :: field()) ->
     boolean().
 hash_del(Key, Field) ->
     R = call_key(Key, mbulk(<<"HDEL">>, Key, Field)),
@@ -794,7 +831,7 @@ hash_del(Key, Field) ->
 
 %% @doc test if the field exists in the hash
 %% O(1)
--spec hash_exists(Key :: key(), Field :: key()) ->
+-spec hash_exists(Key :: key(), Field :: field()) ->
     boolean().
 hash_exists(Key, Field) ->
     R = call_key(Key, mbulk(<<"HEXISTS">>, Key, Field)),

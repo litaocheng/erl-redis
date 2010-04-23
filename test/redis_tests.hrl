@@ -158,19 +158,29 @@ test_zset(Config) ->
 
 test_hash(Config) -> 
     Redis = ?config(redis_client, Config),
-    % Redis 1.3.4
+    % Redis > 1.3.4
     true = ?PF(Redis:hash_set("myhash", "f1", "v1")),
+    true = ?PF(Redis:hash_set_not_exists("myhash", "f11", "v11")),
+    false = ?PF(Redis:hash_set_not_exists("myhash", "f11", "v11")),
+
+    ok = ?PF(Redis:hash_multi_set("myhash", [{"f11", "v11"}, {"f22", "v22"}])),
     <<"v1">> = ?PF(Redis:hash_get("myhash", "f1")),
     null = ?PF(Redis:hash_get("myhash", "f2")),
+    [<<"v11">>, <<"v22">>] = ?PF(Redis:hash_multi_get("myhash", ["f11", "f22"])),
+    [<<"v11">>, <<"v22">>, null] = ?PF(Redis:hash_multi_get("myhash", ["f11", "f22", "f00"])),
+    5 = ?PF(Redis:hash_incr("myhash", "f1", 5)),
+    Redis:hash_del("myhash", "f11"),
+    Redis:hash_del("myhash", "f22"),
+
     true = ?PF(Redis:hash_del("myhash", "f1")),
     false = ?PF(Redis:hash_del("myhash", "f2")),
 
-    % Redis 1.3.4
+    % Redis >1.3.4
     true = ?PF(Redis:hash_set("myhash", "f1", "v1")),
     ?PF(Redis:hash_exists("myhash", "f1")),
     ?PF(Redis:hash_exists("myhash", "f2")),
     true = ?PF(Redis:hash_set("myhash", "f2", "v2")),
-    2 = ?PF(Redis:hash_len("myhash")),
+    int(?PF(Redis:hash_len("myhash"))),
     [<<"f1">>, <<"f2">>] = ?PF(Redis:hash_keys("myhash")),
     [<<"v1">>, <<"v2">>] = ?PF(Redis:hash_vals("myhash")),
     [{<<"f1">>, <<"v1">>}, {<<"f2">>, <<"v2">>}] = ?PF(Redis:hash_all("myhash")),

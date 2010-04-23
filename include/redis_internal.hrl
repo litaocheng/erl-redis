@@ -71,6 +71,7 @@
 
 %% type defines
 -type key() :: binary() | [byte()].
+-type field() :: key().
 -type str() :: binary() | [byte()].
 -type null() :: 'null'.
 -type value() :: null() | str().
