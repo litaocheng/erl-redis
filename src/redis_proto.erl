@@ -91,7 +91,7 @@ mbulk0(B) when is_binary(B) ->
     N = byte_size(B),
     ["$", ?N2S(N), ?CRLF, B, ?CRLF];
 mbulk0(L) when is_list(L) ->
-    N = length(L),
+    N = iolist_size(L),
     ["$", ?N2S(N), ?CRLF, L, ?CRLF].
 
 %% tokens
