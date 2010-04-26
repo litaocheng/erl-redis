@@ -32,14 +32,13 @@ end_per_testcase(Name, Config) ->
     io:format("...end ~p~n~p~n", [Name, Config]),
     ok.
 
+-include("redis_tests.hrl").
+
 all() -> 
     [
-        do_test
+        all_tests()
     ].
 
 %%-------------------------------------------------------------------------
 %% Test cases starts here.
 %%-------------------------------------------------------------------------
-
-do_test(Config) ->
-    redis_tests:do(Config).

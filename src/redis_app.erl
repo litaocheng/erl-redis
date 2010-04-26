@@ -20,11 +20,11 @@
 -export([dist_server/1, dist_server/2]).
 -export([group_server/4]).
 -export([client/1, client/2]).
+-export([trans_handler/4]).
 
 -export([start/2, stop/1]).
 -export([init/1]).
 
--define(GROUP_DEFAULT, '$default').
 
 -spec start() -> 'ok' | {'error', any()}.
 start() ->
@@ -72,13 +72,22 @@ group_server(Group, Type, Server, Pwd) ->
 client(Type) ->
     redis:new(manager_name(?GROUP_DEFAULT, Type),
         ?GROUP_DEFAULT,
-        Type).
+        Type,
+        ?CONTEXT_NORMAL,
+        ?CLIENT_NULL).
 
 -spec client(group(), server_type()) -> tuple().
 client(Group, Type) ->
     redis:new(manager_name(Group, Type),
         Group, 
-        Type).
+        Type,
+        ?CONTEXT_NORMAL,
+        ?CLIENT_NULL).
+
+-spec trans_handler(atom(), group(), server_type(), atom()) ->
+    tuple().
+trans_handler(Mgr, Group, Type, Client) ->
+    redis:new(Mgr, Group, Type, ?CONTEXT_TRANS, Client).
 
 %% start the redis server manager
 start_manager(Group, {Type, _} = Mode, Passwd) ->

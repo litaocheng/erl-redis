@@ -14,7 +14,7 @@
 -record(redis_sort, {
     by_pat = "" :: string(),
     get_pat = [] :: [string()],    % get pattern list
-    limit = null,                   % the limit info {Start, Count}
+    limit = null,                  % the limit info {Start, Count}
     asc = true, 
     alpha = false,
     store = "" :: iolist() 

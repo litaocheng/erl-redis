@@ -12,67 +12,41 @@
 -vsn('0.1').
 -include("redis_internal.hrl").
 
--export([line/1, line/2, line/3, line/4, line_list/1,
-         bulk/3, bulk/4, mbulk/1]).
+-export([mbulk/1, mbulk/2, mbulk/3, mbulk/4, mbulk_list/1]).
+
 -export([parse_reply/1]).
 -export([tokens/2]).
 
 -compile([opt_bin_info]).
--compile({inline, [line/1, line/2, line/3, line/4, line_list/1,
-         bulk/3, bulk/4, mbulk/1, parse_reply/1]}).  
-
-%% @doc generate the line 
--spec line(iolist()) -> iolist().
-line(Type) ->
-    [Type, ?CRLF].
-
--spec line(iolist(), iolist()) ->
-    iolist().
-line(Type, Arg) ->
-    [Type, ?SEP, Arg, ?CRLF].
-
--spec line(iolist(), iolist(), iolist()) -> 
-    iolist().
-line(Type, Arg1, Arg2) ->
-    [Type, ?SEP, Arg1, ?SEP, Arg2, ?CRLF].
-
--spec line(iolist(), iolist(), iolist(), iolist()) -> 
-    iolist().
-line(Type, Arg1, Arg2, Arg3) ->
-    [Type, ?SEP, Arg1, ?SEP, Arg2, ?SEP, Arg3, ?CRLF].
-
--spec line_list([iolist()]) ->
-    iolist().
-line_list(Parts) ->
-    [?SEP | Line] = 
-    lists:foldr(
-        fun(P, Acc) ->
-            [?SEP, P | Acc]
-        end,
-    [?CRLF], Parts),
-    Line.
-
-%% @doc generate the bulk command
--spec bulk(iolist(), iolist(), iolist()) -> 
-    iolist().
-bulk(Type, Arg1, Arg2) ->
-    L1 = line(Type, Arg1, ?N2S(iolist_size(Arg2))),
-    L2 = line(Arg2),
-    [L1, L2].
--spec bulk(iolist(), iolist(), iolist(), iolist()) -> 
-    iolist().
-bulk(Type, Arg1, Arg2, Arg3) ->
-    L1 = line(Type, Arg1, Arg2, ?N2S(iolist_size(Arg3))),
-    L2 = line(Arg3),
-    [L1, L2].
+-compile({inline, 
+        [mbulk/1, mbulk/2, mbulk/3, mbulk/4, mbulk_list/1, parse_reply/1]}).  
 
 %% @doc generate the mbulk command
--spec mbulk(L :: [iolist()]) ->
+-spec mbulk(iodata()) -> iolist().
+mbulk(Type) ->
+    [<<"*1">>, ?CRLF, mbulk0(Type)].
+
+-spec mbulk(iodata(), iodata()) ->
     iolist().
-mbulk(L) ->
+mbulk(Type, Arg) ->
+    [<<"*2">>, ?CRLF, mbulk0(Type), mbulk0(Arg)].
+
+-spec mbulk(iodata(), iodata(), iodata()) -> 
+    iolist().
+mbulk(Type, Arg1, Arg2) ->
+    [<<"*3">>, ?CRLF, mbulk0(Type), mbulk0(Arg1), mbulk0(Arg2)].
+
+-spec mbulk(iodata(), iodata(), iodata(), iodata()) -> 
+    iolist().
+mbulk(Type, Arg1, Arg2, Arg3) ->
+    [<<"*4">>, ?CRLF, mbulk0(Type), mbulk0(Arg1), mbulk0(Arg2), mbulk0(Arg3)].
+
+-spec mbulk_list(L :: [iodata()]) ->
+    iolist().
+mbulk_list(L) ->
     N = length(L),
-    Lines = [mbulk1(E) || E <- L],
-    ["*", ?N2S(N), ?CRLF | Lines].
+    Lines = [mbulk0(E) || E <- L],
+    [<<"*">>, ?N2S(N), ?CRLF, Lines].
 
 %% @doc parse the reply
 -spec parse_reply(Bin :: binary()) ->
@@ -113,11 +87,11 @@ tokens(S, Sep) when is_integer(Sep) ->
 %%------------------------------------------------------------------------------
 
 %% generte mbulk command line
-mbulk1(B) when is_binary(B) ->
+mbulk0(B) when is_binary(B) ->
     N = byte_size(B),
     ["$", ?N2S(N), ?CRLF, B, ?CRLF];
-mbulk1(L) when is_list(L) ->
-    N = length(L),
+mbulk0(L) when is_list(L) ->
+    N = iolist_size(L),
     ["$", ?N2S(N), ?CRLF, L, ?CRLF].
 
 %% tokens

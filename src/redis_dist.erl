@@ -59,13 +59,7 @@ partition_keys(KList, KFun, Dist) ->
     D = 
     lists:foldl(
         fun(KE, Acc) ->
-            K =
-            case KFun of
-                null ->
-                    KE;
-                _ ->
-                    KFun(KE)
-            end,
+            K = ?CALL_FUN(KE, KFun),
             {ok, Server} = get_server(K, Dist),
             dict:append(Server, KE, Acc)
         end,
