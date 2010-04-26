@@ -58,6 +58,7 @@ test_string(Config) ->
 
     ok = ?PF(Redis:set("key1", "hello")),
     ok = ?PF(Redis:set("key2", <<"world">>)),
+    ok = ?PF(Redis:set("key2-expire", <<"world">>, 1000)),
     <<"hello">> = ?PF(Redis:get("key1")),
     KeyNow = lists:concat(["key", now_sec()]),
     null = ?PF(Redis:get(KeyNow)),

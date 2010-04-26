@@ -23,7 +23,7 @@
         flush_db/0, flush_all/0]).
 
 %% string commands
--export([set/2, get/1, getset/2, multi_get/1, not_exists_set/2, multi_set/1,
+-export([set/2, set/3, get/1, getset/2, multi_get/1, not_exists_set/2, multi_set/1,
         multi_set_not_exists/1, incr/1, incr/2, decr/1, decr/2]).
 
 %% list commands
@@ -305,6 +305,13 @@ flush_all() ->
     'ok'.
 set(Key, Val) ->
     call_key(Key, mbulk(<<"SET">>, Key, Val)).
+
+%% @doc set the string as value of the key with expired time
+%% O(1)
+-spec set(key(), str(), second()) ->
+    'ok'.
+set(Key, Val, Expire) ->
+    call_key(Key, mbulk(<<"SETEX">>, Key, ?N2S(Expire), Val)).
     
 %% @doc get the value of specified key
 %% O(1)
