@@ -123,7 +123,7 @@ server_type() ->
 %% @doc return the currently selected db
 -spec db() -> index().
 db() ->
-    redis_manager:get_selected_db(Manager).
+    redis_manager:get_selected_db(PManager).
 
 %%------------------------------------------------------------------------------
 %% generic commands

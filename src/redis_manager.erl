@@ -144,7 +144,7 @@ handle_call({get_server, Type}, _From, State) ->
     {reply, Reply, State};
 handle_call({set, dbindex, Index}, _From, State) ->
     {reply, ok, State#state{dbindex = Index}};
-handle_call({get, dbindex}, _From, State = #{dbindx = Index}) ->
+handle_call({get, dbindex}, _From, State = #state{dbindex = Index}) ->
     {reply, Index, State};
 handle_call(_Msg, _From, State) ->
     {noreply, State}.
