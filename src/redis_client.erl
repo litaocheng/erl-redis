@@ -241,7 +241,7 @@ do_multi_send(Clients, Req, Timeout) ->
     Tag = make_ref(),
     Caller = self(),
     Receiver =
-	spawn(
+    spawn(
     fun() ->
         %% Middleman process. Should be unsensitive to regular
         %% exit signals. The sychronization is needed in case
@@ -287,40 +287,40 @@ do_rec_replys(Tag, Monitors, TimerId) ->
     do_rec_replys(Tag, Monitors, [], [], TimerId).
 do_rec_replys(Tag, [{P, R}|Tail], BadClients, Replies, TimerId) ->
     receive
-	{'DOWN', R, _, _, _} ->
-	    do_rec_replys(Tag, Tail, [P|BadClients], Replies, TimerId);
-	{Tag, Reply} ->  %% Tag is bound !!!
-	    unmonitor(R), 
-	    do_rec_replys(Tag, Tail, BadClients, 
-		      [{P,Reply}|Replies], TimerId);
-	{timeout, TimerId, _} ->	
-	    unmonitor(R),
-	    %% Collect all replies that already have arrived
-	    do_rec_replys_rest(Tag, Tail, [P|BadClients], Replies)
+    {'DOWN', R, _, _, _} ->
+        do_rec_replys(Tag, Tail, [P|BadClients], Replies, TimerId);
+    {Tag, Reply} ->  %% Tag is bound !!!
+        unmonitor(R), 
+        do_rec_replys(Tag, Tail, BadClients, 
+              [{P,Reply}|Replies], TimerId);
+    {timeout, TimerId, _} ->    
+        unmonitor(R),
+        %% Collect all replies that already have arrived
+        do_rec_replys_rest(Tag, Tail, [P|BadClients], Replies)
     end;
 do_rec_replys(_, [], BadClients, Replies, TimerId) ->
     case catch erlang:cancel_timer(TimerId) of
-	false ->  % It has already sent it's message
-	    receive
-		{timeout, TimerId, _} -> ok
-	    after 0 ->
-		    ok
-	    end;
-	_ -> % Timer was cancelled, or TimerId was 'undefined'
-	    ok
+    false ->  % It has already sent it's message
+        receive
+        {timeout, TimerId, _} -> ok
+        after 0 ->
+            ok
+        end;
+    _ -> % Timer was cancelled, or TimerId was 'undefined'
+        ok
     end,
     {Replies, BadClients}.
 %% Collect all replies that already have arrived
 do_rec_replys_rest(Tag, [{P,R}|Tail], BadClients, Replies) ->
     receive
-	{'DOWN', R, _, _, _} ->
-	    do_rec_replys_rest(Tag, Tail, [P|BadClients], Replies);
-	{Tag, Reply} -> %% Tag is bound !!!
-	    unmonitor(R),
-	    do_rec_replys_rest(Tag, Tail, BadClients, [{P,Reply}|Replies])
+    {'DOWN', R, _, _, _} ->
+        do_rec_replys_rest(Tag, Tail, [P|BadClients], Replies);
+    {Tag, Reply} -> %% Tag is bound !!!
+        unmonitor(R),
+        do_rec_replys_rest(Tag, Tail, BadClients, [{P,Reply}|Replies])
     after 0 ->
-	    unmonitor(R),
-	    do_rec_replys_rest(Tag, Tail, [P|BadClients], Replies)
+        unmonitor(R),
+        do_rec_replys_rest(Tag, Tail, [P|BadClients], Replies)
     end;
 do_rec_replys_rest(_Tag, [], BadClients, Replies) ->
     {Replies, BadClients}.
@@ -329,8 +329,8 @@ do_rec_replys_rest(_Tag, [], BadClients, Replies) ->
 unmonitor(Ref) when is_reference(Ref) ->
     erlang:demonitor(Ref),
     receive
-	{'DOWN', Ref, _, _, _} ->
-	    true
+    {'DOWN', Ref, _, _, _} ->
+        true
     after 0 ->
-	    true
+        true
     end.

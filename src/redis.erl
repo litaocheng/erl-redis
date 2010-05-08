@@ -3,9 +3,12 @@
 %%% @copyright erl-redis 2010
 %%%
 %%% @author litaocheng@gmail.com
-%%% @doc the interface for redis, this module is parametered module,
-%%%     the parameter is the Manager process registered name,the group and
-%%%     the server mode
+%%% @doc the interface for redis, this module is parameterized module:
+%%%     PManager - the Manager process registered name
+%%%     PGroup - the group name
+%%%     PSType - the server mode 'single' or 'dist'
+%%%     PContext - the run context 'normal' or 'trans'
+%%%     PClient - the context related client process
 %%% @end
 %%%
 %%%----------------------------------------------------------------------
