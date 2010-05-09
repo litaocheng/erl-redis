@@ -14,6 +14,9 @@
 -include("redis_internal.hrl").
 
 -export([start/3, start/4, start_link/3, start_link/4]).
+-export([stop/1]).
+-export([handler/1]).
+
 -export([get_server/1, get_sock/1]).
 -export([set_selected_db/2, get_selected_db/1]).
 -export([send/2]).
@@ -22,7 +25,7 @@
 
 %% some untility functions
 -export([msg_send_cb/2]).
--export([name/3, name/4]).
+-export([name/2, existing_name/2, name/3, existing_name/3]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -73,6 +76,14 @@ start_link(Host, Port, Passwd) ->
 start_link(Host, Port, Passwd, Name) ->
     ?DEBUG2("start_link redis_client ~p", [Name]),
     gen_server:start_link({local, Name}, ?MODULE, {{Host, Port}, Passwd}, []).
+
+-spec stop(client()) -> 'ok'.
+stop(Client) ->
+    gen_server:call(Client, stop).
+
+-spec handler(client()) -> tuple().
+handler(Client) ->
+    redis:new(Client).
 
 %% @doc get the server info
 -spec get_server(Client :: pid()) -> inet_server().
@@ -149,16 +160,16 @@ msg_send_cb(Dest, message) ->
     end.
 
 %% @doc generate process registered name
-name(Host, Port, First) ->
-    L = lists:concat(["redis_client_", Host, "_", Port]),
-    to_name(L, First).
+name(Host, Port) ->
+    to_name(Host, Port, true).
+existing_name(Host, Port) ->
+    to_name(Host, Port, false).
 
 %% @doc generate process registered name
-name(Host, Port, UserData, First) when is_list(UserData);
-                                is_atom(UserData);
-                                is_integer(UserData) ->
-    L = lists:concat(["redis_client_", Host, "_", Port, "_", UserData]),
-    to_name(L, First).
+name(Host, Port, UserData) ->
+    to_name(Host, Port, UserData, true).
+existing_name(Host, Port, UserData) ->
+    to_name(Host, Port, UserData, false).
 
 %%
 %% gen_server callbacks
@@ -220,6 +231,8 @@ handle_call({set, dbindex, Index}, _From, State) ->
     {reply, ok, State#state{dbindex = Index}};
 handle_call({get, dbindex}, _From, State = #state{dbindex = Index}) ->
     {reply, Index, State};
+handle_call(stop, _From, State) ->
+    {stop, normal, ok, State};
 handle_call(_Msg, _From, State) ->
     {noreply, State}.
 
@@ -251,9 +264,18 @@ code_change(_Old, State, _Extra) ->
 %%
 %%-----------------------------------------------------------------------------
 
-to_name(String, true) ->
+to_name(Host, Port, First) ->
+    L = lists:concat(["redis_client_", Host, "_", Port]),
+    to_atom(L, First).
+to_name(Host, Port, UserData, First) when is_list(UserData);
+                                is_atom(UserData);
+                                is_integer(UserData) ->
+    L = lists:concat(["redis_client_", Host, "_", Port, "_", UserData]),
+    to_atom(L, First).
+
+to_atom(String, true) ->
     list_to_atom(String);
-to_name(String, false) ->
+to_atom(String, false) ->
     list_to_existing_atom(String).
 
 %% do sync send and recv 
@@ -365,3 +387,21 @@ do_auth(Sock, Passwd) ->
         _ ->
             do_send_recv([<<"AUTH ">>, Passwd, ?CRLF], Sock)
     end.
+
+-ifdef(TEST).
+
+to_name_test() ->
+    ?assertEqual('redis_client_localhost_233', to_name(localhost, 233, true)),
+    ?assertEqual('redis_client_localhost_233', to_name(localhost, 233, false)),
+    ?assertEqual('redis_client_localhost_233', to_name('localhost', 233, true)),
+    ?assertEqual('redis_client_localhost_233', to_name("localhost", 233, true)),
+
+    ?assertEqual('redis_client_localhost_233_1', to_name(localhost, 233, 1, true)),
+    ?assertEqual('redis_client_localhost_233_1', to_name(localhost, 233, 1, false)),
+    ?assertEqual('redis_client_localhost_233_1', to_name('localhost', 233, "1", true)),
+    ?assertEqual('redis_client_localhost_233_1', to_name("localhost", 233, '1', true)),
+    ?assertError(function_clause, to_name("localhost", 233, <<1>>, true)),
+
+    ok.
+
+-endif.

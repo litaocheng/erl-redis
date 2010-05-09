@@ -5,11 +5,10 @@
 %%% @author litaocheng@gmail.com
 %%% @doc the interface for redis, this module is parameterized module:
 %%%     PClient - the context related client process
-%%%     PContext - the run context 'normal' or 'trans'
 %%% @end
 %%%
 %%%----------------------------------------------------------------------
--module(redis, [PClient, PContext]).
+-module(redis, [PClient]).
 -author('litaocheng@gmail.com').
 -vsn('0.1').
 -include("redis_internal.hrl").

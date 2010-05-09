@@ -23,7 +23,7 @@ test: clean unit_test comm_test
 	@#(make clean)
 
 unit_test: test_compile 
-	(erl -pa ./ebin -eval "eunit:test(\"./ebin\", []), init:stop()")
+	(erl -pa ./ebin -eval "eunit:test(\"./ebin\", [verbose]), init:stop()")
 
 comm_test: test_compile 
 	(mkdir -p ./test/log)
