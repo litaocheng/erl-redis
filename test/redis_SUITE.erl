@@ -1,3 +1,8 @@
+-module(redis_SUITE).
+%% Note: This directive should only be used in test suites.
+-compile(export_all).
+
+-include_lib("common_test/include/ct.hrl").
 -include("redis_internal.hrl").
 -define(P(F, D), ?INFO2(F, D)).
     
@@ -8,7 +13,34 @@
         V
     end()).
 
-all_tests() ->
+suite() -> [
+    {timetrap,{minutes,2}}
+    ].
+
+init_per_suite(Config) ->
+    crypto:start(),
+    code:add_path("../ebin"),
+    {ok, Pid} = redis_client:start(localhost, 6379, ""),
+    Redis = redis_client:handler(Pid),
+    ok = Redis:flush_all(),
+    io:format("Redis is ~p~n", [Redis]),
+    [{redis_client, Redis} | Config].
+
+end_per_suite(Config) ->
+    Redis = ?config(redis_client, Config),
+    redis_client:stop(Redis),
+    crypto:stop(),
+    ok.
+
+init_per_testcase(Name, Config) ->
+    io:format("..init ~p~n~p~n", [Name, Config]),
+    Config.
+
+end_per_testcase(Name, Config) ->
+    io:format("...end ~p~n~p~n", [Name, Config]),
+    ok.
+
+all() -> 
     [
         test_generic,
         test_string,
@@ -24,6 +56,9 @@ all_tests() ->
         test_dummy
     ].
 
+%%-------------------------------------------------------------------------
+%% Test cases starts here.
+%%-------------------------------------------------------------------------
 test_dummy(_Config) ->
     ok.
 
@@ -244,24 +279,17 @@ test_sort(Config) ->
 
 test_trans(Config) ->
     Redis = ?config(redis_client, Config),
-    Type = ?config(redis_type, Config),
-    case Type of
-        single ->
-            Trans = ?PF(Redis:trans_begin()),
-            ?PF(Trans:get("k1")),
-            ?PF(Trans:hash_get("myhash", "f2")),
-            ?PF(Trans:hash_set("myhash", "f2", "v22")),
-            ?PF(Trans:trans_commit()),
+    ok = ?PF(Redis:trans_begin()),
+    ?PF(Redis:get("k1")),
+    ?PF(Redis:hash_get("myhash", "f2")),
+    ?PF(Redis:hash_set("myhash", "f2", "v22")),
+    ?PF(Redis:trans_commit()),
 
-            Trans2 = ?PF(Redis:trans_begin()),
-            ?PF(Trans2:get("k1")),
-            ?PF(Trans2:hash_get("myhash", "f2")),
-            ?PF(Trans2:hash_set("myhash", "f2", "v22")),
-            ok = ?PF(Trans2:trans_abort()),
-            ok;
-        _ ->
-            ok
-    end,
+    ok = ?PF(Redis:trans_begin()),
+    ?PF(Redis:get("k1")),
+    ?PF(Redis:hash_get("myhash", "f2")),
+    ?PF(Redis:hash_set("myhash", "f2", "v22")),
+    ok = ?PF(Redis:trans_abort()),
     ok.
 
 test_persistence(Config) -> 

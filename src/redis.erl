@@ -149,7 +149,12 @@ type(Key) ->
 -spec keys(Pattern :: pattern()) -> 
     [key()].
 keys(Pattern) ->
-    call(mbulk(<<"KEYS">>, Pattern)).
+    case call(mbulk(<<"KEYS">>, Pattern)) of
+        null ->
+            [];
+        Keys ->
+            Keys
+    end.
 
 %% @doc return a randomly selected key from the currently selected DB
 %% O(1)

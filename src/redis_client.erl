@@ -77,7 +77,9 @@ start_link(Host, Port, Passwd, Name) ->
     ?DEBUG2("start_link redis_client ~p", [Name]),
     gen_server:start_link({local, Name}, ?MODULE, {{Host, Port}, Passwd}, []).
 
--spec stop(client()) -> 'ok'.
+-spec stop(client() | tuple()) -> 'ok'.
+stop({redis, Client}) ->
+    gen_server:call(Client, stop);
 stop(Client) ->
     gen_server:call(Client, stop).
 
