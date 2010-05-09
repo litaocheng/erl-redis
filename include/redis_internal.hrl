@@ -57,8 +57,8 @@
 -define(REDIS_SUP, redis_sup).
 -define(MANAGER_BASE, "redis_manager").
 -define(CONN_SUP, redis_conn_sup).
--define(CONN_TIMEOUT, 1000).
--define(RECV_TIMEOUT, 1000).  
+-define(CONN_TIMEOUT, 5000).
+-define(RECV_TIMEOUT, 2000).  
 -define(CONN_POOL_MIN, 1).
 -define(CONN_POOL_MAX, 32).
 
@@ -86,6 +86,9 @@
 -type status_code() :: atom().
 -type error() :: {'error', any()}.
 -type score() :: integer() | float() | [byte()].
+-type count() :: non_neg_integer().
+-type channel() :: str().
+-type client() :: pid() | atom().
 
 -type inet_host() :: atom() | string() | binary().
 -type inet_port() :: 0..65535.

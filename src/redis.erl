@@ -4,20 +4,17 @@
 %%%
 %%% @author litaocheng@gmail.com
 %%% @doc the interface for redis, this module is parameterized module:
-%%%     PManager - the Manager process registered name
-%%%     PGroup - the group name
-%%%     PSType - the server mode 'single' or 'dist'
-%%%     PContext - the run context 'normal' or 'trans'
 %%%     PClient - the context related client process
+%%%     PContext - the run context 'normal' or 'trans'
 %%% @end
 %%%
 %%%----------------------------------------------------------------------
--module(redis, [PManager, PGroup, PSType, PContext, PClient]).
--author('ltiaocheng@gmail.com').
+-module(redis, [PClient, PContext]).
+-author('litaocheng@gmail.com').
 -vsn('0.1').
 -include("redis_internal.hrl").
 
--export([i/0, version/0, group/0, server_type/0, server_list/0, db/0]).
+-export([i/0, version/0, db/0]).
 
 %% generic commands
 -export([ping/0, exists/1, delete/1, multi_delete/1, type/1, keys/1,
@@ -44,9 +41,10 @@
 %% sorted set commands
 -export([zset_add/3, zset_rm/2, zset_incr/3, zset_index/2, zset_reverse_index/2,
         zset_range_index/4, zset_range_index_reverse/4, 
-        zset_range_score/4, zset_range_score/6, 
-        zset_rm_by_index/3, zset_rm_by_score/3, zset_len/1, zset_score/2, 
-        zset_union/1, zset_inter/1]).
+        zset_range_score/4, zset_range_score/6, zset_len/1, zset_score/2, 
+        zset_rm_by_index/3, zset_rm_by_score/3, 
+        zset_union_store/2, zset_union_store/4,
+        zset_inter_store/2, zset_inter_store/4]).
 
 
 %% hash commands
@@ -62,19 +60,17 @@
 -export([trans_begin/0, trans_commit/0, trans_abort/0]).
 
 %% persistence commands
--export([save/0, bg_save/0, lastsave_time/0, bg_rewrite_aof/0]).
+-export([save/0, bg_save/0, lastsave_time/0, shutdown/0, bg_rewrite_aof/0]).
 
 %% remote server commands
 -export([info/0]).
 
 %% other unknown commands
+-export([command/1]).
 
 -compile(inline).
 -compile({inline_size, 30}).
 -import(redis_proto, [mbulk/1, mbulk/2, mbulk/3, mbulk/4, mbulk_list/1]).
-
-%% connection pool size
--define(DEF_POOL, 2).
 
 -define(MULTI_REPLY(Ret),
     case BadServers of
@@ -91,12 +87,7 @@
             {error, BadServers}
     end.
 
--define(MUST_SINGLE,
-    if PSType =/= single ->
-        throw(must_single_mode);
-    true ->
-        ok
-    end).
+-define(CALL, redis_client:send(PClient)).
 
 %% @doc show stats info in the stdout
 -spec i() -> 'ok'.
@@ -108,25 +99,10 @@ i() ->
 version() ->
     get_app_vsn().
 
-%% @doc return the group info
--spec group() -> atom().
-group() ->
-    PGroup.
-
-%% @doc return the server list
--spec server_list() -> [single_server()].
-server_list() ->
-    redis_manager:server_list(PManager).
-
-%% @doc return the server config type
--spec server_type() -> server_type().
-server_type() ->
-    redis_manager:server_type(PManager).
-
 %% @doc return the currently selected db
 -spec db() -> index().
 db() ->
-    redis_manager:get_selected_db(PManager).
+    redis_manager:get_selected_db(PClient).
 
 %%------------------------------------------------------------------------------
 %% generic commands
@@ -135,15 +111,14 @@ db() ->
 %% @doc ping the redis server
 -spec ping() -> 'ok' | {'error', [atom()]}.
 ping() ->
-    {_Replies, BadServers} = call_clients(mbulk(<<"PING">>)),
-    ?MULTI_REPLY_OK.
+    call(mbulk(<<"PING">>)).
 
 %% @doc test if the specified key exists
 %% O(1)
 -spec exists(Key :: key()) -> 
     boolean().
 exists(Key) ->
-    R = call_key(Key, mbulk(<<"EXISTS">>, Key)),
+    R = call(mbulk(<<"EXISTS">>, Key)),
     int_may_bool(R).
 
 %% @doc remove the specified key, return ture if deleted, 
@@ -152,7 +127,7 @@ exists(Key) ->
 -spec delete(Keys :: [key()]) -> 
     boolean().
 delete(Key) ->
-    R = call_key(Key, mbulk(<<"DEL">>, Key)),
+    R = call(mbulk(<<"DEL">>, Key)),
     int_may_bool(R).
 
 %% @doc remove the specified keys, return the number of
@@ -161,83 +136,50 @@ delete(Key) ->
 -spec multi_delete(Keys :: [key()]) -> 
     non_neg_integer().
 multi_delete(Keys) ->
-    L = call_partition_keys(<<"DEL">>, Keys, ?FUN_NULL),
-    ?DEBUG2("multi_delete reply : ~p", [L]),
-    lists:sum(L).
+    call(mbulk_list([<<"DEL">> | Keys])).
 
 %% @doc return the type of the value stored at key
 %% O(1)
 -spec type(Key :: key()) -> 
     value_type().
 type(Key) ->
-    call_key(Key, mbulk(<<"TYPE">>, Key)).
+    call(mbulk(<<"TYPE">>, Key)).
 
-%% @doc return the keys list matching a given pattern,
-%% return the {[key()], [atom()]}, the second element in tuple is
-%% the bad servers.
+%% @doc return the keys list matching a given pattern
 %% O(n)
 -spec keys(Pattern :: pattern()) -> 
-    [key()] | {'error', [key()], [atom()]}.
+    [key()].
 keys(Pattern) ->
-    {Replies, BadServers} = call_clients(mbulk(<<"KEYS">>, Pattern)),
-    KeyL = 
-    lists:foldl(
-        fun({_Server, null}, Acc) ->
-                [[] | Acc];
-            ({_Server, R}, Acc) ->
-                [R | Acc]
-        end,
-    [], Replies),
-    Keys = lists:append(KeyL),
-    ?MULTI_REPLY(Keys).
+    call(mbulk(<<"KEYS">>, Pattern)).
 
 %% @doc return a randomly selected key from the currently selected DB
 %% O(1)
 -spec random_key() -> 
     key() | null().
 random_key() ->
-    F = 
-    fun
-        (null) ->
-            false;
-        (_) ->
-            true
-    end,
-    catch call_any(mbulk(<<"RANDOMKEY">>), F).
+    call(mbulk(<<"RANDOMKEY">>)).
 
 %% @doc atmoically renames key OldKey to NewKey
-%% NOTE: MUST single mode
 %% O(1)
 -spec rename(OldKey :: key(), NewKey :: key()) -> 
     'ok'.
 rename(OldKey, NewKey) ->
-    ?MUST_SINGLE,
-    call_key(OldKey, mbulk(<<"RENAME">>, OldKey, NewKey)).
+    call(mbulk(<<"RENAME">>, OldKey, NewKey)).
 
 %% @doc  rename oldkey into newkey  but fails if the destination key newkey already exists. 
-%% NOTE: MUST single mode
 %% O(1)
 -spec rename_not_exists(OldKey :: key(), NewKey :: key()) -> 
     boolean().
 rename_not_exists(OldKey, NewKey) ->
-    ?MUST_SINGLE,
-    R = call_key(OldKey, mbulk(<<"RENAMENX">>, OldKey, NewKey)),
+    R = call(mbulk(<<"RENAMENX">>, OldKey, NewKey)),
     int_may_bool(R).
 
 %% @doc return the nubmer of keys in all the currently selected database
 %% O(1)
 -spec dbsize() -> 
-    integer() | {'error', integer(), [atom()]}.
+    integer().
 dbsize() ->
-    {Replies, BadServers} = call_clients(mbulk(<<"DBSIZE">>)),
-    Size = 
-    lists:foldl(
-        fun({_Server, R}, Acc) ->
-            R + Acc
-        end,
-    0, Replies),
-    ?MULTI_REPLY(Size).
-
+    call(mbulk(<<"DBSIZE">>)).
 
 %% @doc set a timeout on the specified key, after the Time the Key will
 %% automatically deleted by server.
@@ -245,7 +187,7 @@ dbsize() ->
 -spec expire(Key :: key(), Time :: second()) -> 
     boolean().
 expire(Key, Time) ->
-    R = call_key(Key, mbulk(<<"EXPIRE">>, Key, ?N2S(Time))),
+    R = call(mbulk(<<"EXPIRE">>, Key, ?N2S(Time))),
     int_may_bool(R).
 
 %% @doc set a unix timestamp on the specified key, the Key will
@@ -254,7 +196,7 @@ expire(Key, Time) ->
 -spec expire_at(Key :: key(), TimeStamp :: timestamp()) -> 
     boolean().
 expire_at(Key, TimeStamp) ->
-    R = call_key(Key, mbulk(<<"EXPIREAT">>, Key, ?N2S(TimeStamp))),
+    R = call(mbulk(<<"EXPIREAT">>, Key, ?N2S(TimeStamp))),
     int_may_bool(R).
 
 %% @doc return the remaining time to live in seconds of a key that
@@ -262,41 +204,36 @@ expire_at(Key, TimeStamp) ->
 %% O(1)
 -spec ttl(Key :: key()) -> non_neg_integer().
 ttl(Key) ->
-    call_key(Key, mbulk(<<"TTL">>, Key)).
+    call(mbulk(<<"TTL">>, Key)).
 
 %% @doc select the DB with have the specified zero-based numeric index
-%% ??
 -spec select(Index :: index()) ->
-    'ok' | {'error', [inet_server()]}.
+    'ok'.
 select(Index) ->
-    {_Replies, BadServers} = call_clients(mbulk(<<"SELECT">>, ?N2S(Index))),
-    case BadServers of
-        [] ->
-            redis_manager:set_selected_db(PManager, Index);
-        [_|_] ->
-            {error, BadServers}
+    R = call(mbulk(<<"SELECT">>, ?N2S(Index))),
+    case R of
+        ok ->
+            redis_client:set_selected_db(PClient, Index);
+        Other ->
+            Other
     end.
 
 %% @doc move the specified key  from the currently selected DB to the specified
 %% destination DB
-%% NOTE: MUST single mode
 -spec move(Key :: key(), DBIndex :: index()) ->
     boolean().
 move(Key, DBIndex) ->
-    ?MUST_SINGLE,
-    R = call_key(Key, mbulk(<<"MOVE">>, Key, ?N2S(DBIndex))),
+    R = call(mbulk(<<"MOVE">>, Key, ?N2S(DBIndex))),
     int_may_bool(R).
 
 %% @doc delete all the keys of the currently selected DB
--spec flush_db() -> 'ok' | {'error', [atom()]}.
+-spec flush_db() -> 'ok'.
 flush_db() ->
-    {_Replies, BadServers} = call_clients(mbulk(<<"FLUSHDB">>)),
-    ?MULTI_REPLY_OK.
+    call(mbulk(<<"FLUSHDB">>)).
             
--spec flush_all() -> 'ok' | {'error', [atom()]}.
+-spec flush_all() -> 'ok'.
 flush_all() ->
-    {_Replies, BadServers} = call_clients(mbulk(<<"FLUSHALL">>)),
-    ?MULTI_REPLY_OK.
+    call(mbulk(<<"FLUSHALL">>)).
 
 %%------------------------------------------------------------------------------
 %% string commands 
@@ -307,71 +244,60 @@ flush_all() ->
 -spec set(Key :: key(), Val :: str()) ->
     'ok'.
 set(Key, Val) ->
-    call_key(Key, mbulk(<<"SET">>, Key, Val)).
+    call(mbulk(<<"SET">>, Key, Val)).
 
 %% @doc set the string as value of the key with expired time
 %% O(1)
 -spec set(key(), str(), second()) ->
     'ok'.
 set(Key, Val, Expire) ->
-    call_key(Key, mbulk(<<"SETEX">>, Key, ?N2S(Expire), Val)).
+    call(mbulk(<<"SETEX">>, Key, ?N2S(Expire), Val)).
     
 %% @doc get the value of specified key
 %% O(1)
 -spec get(Key :: key()) ->
     null() | binary().
 get(Key) ->
-    call_key(Key, mbulk(<<"GET">>, Key)).
+    call(mbulk(<<"GET">>, Key)).
 
 %% @doc atomatic set the value and return the old value
 %% O(1)
 -spec getset(Key :: key(), Val :: str()) ->
     null() | binary(). 
 getset(Key, Val) ->
-    call_key(Key, mbulk(<<"GETSET">>, Key, Val)).
+    call(mbulk(<<"GETSET">>, Key, Val)).
 
 %% @doc get the values of all the specified keys
 %% O(1)
 -spec multi_get(Keys :: [key()]) ->
     [string() | null()].
 multi_get(Keys) ->
-    Len = length(Keys),
-    KeyIndexs = lists:zip(lists:seq(1, Len), Keys),
-    KFun = fun({_Index, K}) -> K end,
-    AllReplies = lists:append(call_partition_keys(<<"MGET">>, KeyIndexs, KFun)),
-    % return the result in the same order with Keys
-    SortedReplies = lists:sort(AllReplies),
-    {KeyIndexs, Replies} = lists:unzip(SortedReplies),
-    Replies.
+    call(mbulk_list([<<"MGET">> | Keys])).
 
 %% @doc set value, if the key already exists no operation is performed
 %% O(1)
 -spec not_exists_set(Key :: key(), Val :: string()) -> 
     boolean().
 not_exists_set(Key, Val) ->
-    R = call_key(Key, mbulk(<<"SETNX">>, Key, Val)),
+    R = call(mbulk(<<"SETNX">>, Key, Val)),
     int_may_bool(R).
 
 %% @doc set the respective keys to respective values
-%% NOTE: MUST single mode
 %% O(1)
 -spec multi_set(KeyVals :: [{key(), str()}]) ->
     'ok'.
 multi_set(KeyVals) ->
-    ?MUST_SINGLE,
     L = [<<"MSET">> | lists:append([[K, V] || {K, V} <- KeyVals])],
-    call_single_client(mbulk_list(L)).
+    call(mbulk_list(L)).
 
 %% @doc set the respective keys to respective values, either all the
 %% key-value paires or not none at all are set.
-%% NOTE: MUST single mode
 %% O(1)
 -spec multi_set_not_exists(KeyVals :: [{key(), str()}]) ->
     boolean().
 multi_set_not_exists(KeyVals) ->
-    ?MUST_SINGLE,
     L = [<<"MSETNX">> | lists:append([[K, V] || {K, V} <- KeyVals])],
-    R = call_single_client(mbulk_list(L)),
+    R = call(mbulk_list(L)),
     int_may_bool(R).
 
 %% @doc increase the integer value of key
@@ -379,28 +305,28 @@ multi_set_not_exists(KeyVals) ->
 -spec incr(Key :: key()) -> 
     integer().
 incr(Key) ->
-    call_key(Key, mbulk(<<"INCR">>, Key)).
+    call(mbulk(<<"INCR">>, Key)).
 
 %% @doc increase the integer value of key by integer
 %% O(1)
 -spec incr(Key :: key(), N :: integer()) -> 
     integer().
 incr(Key, N) ->
-    call_key(Key, mbulk(<<"INCRBY">>, Key, ?N2S(N))).
+    call(mbulk(<<"INCRBY">>, Key, ?N2S(N))).
 
 %% @doc decrease the integer value of key
 %% O(1)
 -spec decr(Key :: key()) -> 
     integer().
 decr(Key) ->
-    call_key(Key, mbulk(<<"DECR">>, Key)).
+    call(mbulk(<<"DECR">>, Key)).
 
 %% @doc decrease the integer value of key by integer
 %% O(1)
 -spec decr(Key :: key(), N :: integer()) -> 
     integer().
 decr(Key, N) ->
-    call_key(Key, mbulk(<<"DECRBY">>, Key, ?N2S(N))).
+    call(mbulk(<<"DECRBY">>, Key, ?N2S(N))).
 
 %%------------------------------------------------------------------------------
 %% list commands
@@ -412,28 +338,28 @@ decr(Key, N) ->
 -spec list_push_tail(Key :: key(), Val :: str()) ->
     integer().
 list_push_tail(Key, Val) ->
-    call_key(Key, mbulk(<<"RPUSH">>, Key, Val)).
+    call(mbulk(<<"RPUSH">>, Key, Val)).
 
 %% @doc add the string Val to the head of the list stored at Key
 %% O(1)
 -spec list_push_head(Key :: key(), Val :: str()) ->
     'ok' | error().
 list_push_head(Key, Val) ->
-    call_key(Key, mbulk(<<"LPUSH">>, Key, Val)).
+    call(mbulk(<<"LPUSH">>, Key, Val)).
 
 %% @doc return the length of the list
 %% O(1)
 -spec list_len(Key :: key()) ->
     length() | error().
 list_len(Key) ->
-    call_key(Key, mbulk(<<"LLEN">>, Key)).
+    call(mbulk(<<"LLEN">>, Key)).
 
 %% @doc return the specified elements of the list, Start, End are zero-based
 %% O(n)
 -spec list_range(Key :: key(), Start :: index(), End :: index()) ->
     [value()].
 list_range(Key, Start, End) ->
-    call_key(Key, mbulk(<<"LRANGE">>, Key, ?N2S(Start), ?N2S(End))).
+    call(mbulk(<<"LRANGE">>, Key, ?N2S(Start), ?N2S(End))).
 
 %% @doc trim an existing list, it will contains the elements specified by 
 %% Start End
@@ -441,28 +367,28 @@ list_range(Key, Start, End) ->
 -spec list_trim(Key :: key(), Start :: index(), End :: index()) ->
     'ok' | error().
 list_trim(Key, Start, End) ->
-    call_key(Key, mbulk(<<"LTRIM">>, Key, ?N2S(Start), ?N2S(End))).
+    call(mbulk(<<"LTRIM">>, Key, ?N2S(Start), ?N2S(End))).
 
 %% @doc return the element at Idx in the list(zero-based)
 %% O(n)
 -spec list_index(Key :: key(), Idx :: index()) ->
     value().
 list_index(Key, Idx) ->
-    call_key(Key, mbulk(<<"LINDEX">>, Key, ?N2S(Idx))).
+    call(mbulk(<<"LINDEX">>, Key, ?N2S(Idx))).
 
 %% @doc set the list element at Idx with the new value Val
 %% O(n)
 -spec list_set(Key :: key(), Idx :: index(), Val :: str()) ->
     'ok' | error().
 list_set(Key, Idx, Val) ->
-    call_key(Key, mbulk(<<"LSET">>, Key, ?N2S(Idx), Val)).
+    call(mbulk(<<"LSET">>, Key, ?N2S(Idx), Val)).
 
 %% @doc remove all the elements in the list whose value are Val
 %% O(n)
 -spec list_rm(Key :: key(), Val :: str()) ->
     integer().
 list_rm(Key, Val) ->
-    call_key(Key, mbulk(<<"LREM">>, Key, "0", Val)).
+    call(mbulk(<<"LREM">>, Key, "0", Val)).
 
 %% @doc remove the first N occurrences of the value from head to
 %% tail in the list
@@ -470,7 +396,7 @@ list_rm(Key, Val) ->
 -spec list_rm_from_head(Key :: key(), N :: pos_integer(), Val :: str()) ->
     integer().
 list_rm_from_head(Key, N, Val) ->
-    call_key(Key, mbulk(<<"LREM">>, Key, ?N2S(N), Val)).
+    call(mbulk(<<"LREM">>, Key, ?N2S(N), Val)).
 
 %% @doc remove the first N occurrences of the value from tail to
 %% head in the list
@@ -478,49 +404,45 @@ list_rm_from_head(Key, N, Val) ->
 -spec list_rm_from_tail(Key :: key(), N :: pos_integer(), Val :: str()) ->
     integer().
 list_rm_from_tail(Key, N, Val) ->
-    call_key(Key, mbulk(<<"LREM">>, Key, ?N2S(-N), Val)).
+    call(mbulk(<<"LREM">>, Key, ?N2S(-N), Val)).
 
 %% @doc atomically return and remove the first element of the list
 %% O(1)
 -spec list_pop_head(Key :: key()) ->
     value().
 list_pop_head(Key) ->
-    call_key(Key, mbulk(<<"LPOP">>, Key)).
+    call(mbulk(<<"LPOP">>, Key)).
 
 %% @doc atomically return and remove the last element of the list
 %% O(1)
 -spec list_pop_tail(Key :: key()) ->
     value().
 list_pop_tail(Key) ->
-    call_key(Key, mbulk(<<"RPOP">>, Key)).
+    call(mbulk(<<"RPOP">>, Key)).
 
 %% @doc atomically remove the last element of the SrcKey list and push
 %% the element into the DstKey list
-%% NOTE: MUST single mode
 %% O(1)
 -spec list_tail_to_head(SrcKey :: key(), DstKey :: key()) ->
     'ok'.
 list_tail_to_head(SrcKey, DstKey) ->
-    ?MUST_SINGLE,
-    call_single_client(mbulk(<<"RPOPLPUSH">>, SrcKey, DstKey)).
+    call(mbulk(<<"RPOPLPUSH">>, SrcKey, DstKey)).
 
 %% @doc blocking list_pop_head
 %% O(1)
 -spec list_block_pop_head([key()], timeout()) ->
     value().
 list_block_pop_head(Keys, Timeout) ->
-    ?MUST_SINGLE,
     TimeStr = ?N2S(timeout_val(Timeout)),
-    call_single_client(mbulk([<<"BLPOP">> | Keys ++ [TimeStr]])).
+    call(mbulk([<<"BLPOP">> | (Keys ++ [TimeStr])])).
 
 %% @doc blocking list_pop_tail
 %% O(1)
 -spec list_block_pop_tail([key()], timeout()) ->
     value().
 list_block_pop_tail(Keys, Timeout) ->
-    ?MUST_SINGLE,
     TimeStr = ?N2S(timeout_val(Timeout)),
-    call_single_client(mbulk([<<"LRPOP">> | Keys ++ [TimeStr]])).
+    call(mbulk([<<"BRPOP">> | (Keys ++ [TimeStr])])).
 
 %%------------------------------------------------------------------------------
 %% set commands (in set all members is distinct)
@@ -531,14 +453,14 @@ list_block_pop_tail(Keys, Timeout) ->
 -spec set_add(Key :: key(), Mem :: str()) ->
     boolean().
 set_add(Key, Mem) ->
-    R = call_key(Key, mbulk(<<"SADD">>, Key, Mem)),
+    R = call(mbulk(<<"SADD">>, Key, Mem)),
     int_may_bool(R).
 
 %% @doc remove the specified member from the set
 -spec set_rm(Key :: key(), Mem :: str()) ->
     boolean().
 set_rm(Key, Mem) ->
-    R = call_key(Key, mbulk(<<"SREM">>, Key, Mem)),
+    R = call(mbulk(<<"SREM">>, Key, Mem)),
     int_may_bool(R).
 
 %% @doc remove a random member from the set, returning it as return value
@@ -546,16 +468,14 @@ set_rm(Key, Mem) ->
 -spec set_pop(Key :: key()) ->
     value().
 set_pop(Key) ->
-    call_key(Key, mbulk(<<"SPOP">>, Key)).
+    call(mbulk(<<"SPOP">>, Key)).
 
 %% @doc atomically move the member form one set to another
-%% NOTE: MUST single mode
 %% O(1)
 -spec set_move(Src :: key(), Dst :: key(), Mem :: str()) ->
     boolean().
 set_move(Src, Dst, Mem) ->
-    ?MUST_SINGLE,
-    R = call_key(Src, mbulk(<<"SMOVE">>, Src, Dst, Mem)),
+    R = call(mbulk(<<"SMOVE">>, Src, Dst, Mem)),
     int_may_bool(R).
 
 %% @doc return the number of elements in set
@@ -563,84 +483,73 @@ set_move(Src, Dst, Mem) ->
 -spec set_len(Key :: key()) ->
     integer().
 set_len(Key) ->
-    call_key(Key, mbulk(<<"SCARD">>, Key)).
+    call(mbulk(<<"SCARD">>, Key)).
 
 %% @doc test if the specified value is the member of the set
 %% O(1)
 -spec set_is_member(Key :: key(), Mem :: str()) ->
     boolean().
 set_is_member(Key, Mem) ->
-    R = call_key(Key, mbulk(<<"SISMEMBER">>, Key, Mem)),
+    R = call(mbulk(<<"SISMEMBER">>, Key, Mem)),
     int_may_bool(R).
 
 %% @doc return the intersection between the sets
-%% NOTE: MUST single mode
 %% O(N*M)
 -spec set_inter(Keys :: [key()]) ->
     [value()].
 set_inter(Keys) ->
-    ?MUST_SINGLE,
-    call_single_client(mbulk_list([<<"SINTER">> | Keys])).
+    call(mbulk_list([<<"SINTER">> | Keys])).
 
 %% @doc compute the intersection between the sets and save the 
 %% resulting to new set
 -spec set_inter_store(Dst :: key(), Keys :: [key()]) ->
     'ok' | error().
 set_inter_store(Dst, Keys) ->
-    ?MUST_SINGLE,
-    call_single_client(mbulk_list([<<"SINTERSTORE">>, Dst | Keys])).
+    call(mbulk_list([<<"SINTERSTORE">>, Dst | Keys])).
 
 %% @doc  return the union of all the sets
-%% NOTE: MUST single mode
 %% O(n)
 -spec set_union(Keys :: [key()]) ->
     [value()].
 set_union(Keys) ->
-    ?MUST_SINGLE,
-    call_single_client(mbulk_list([<<"SUNION">> | Keys])).
+    call(mbulk_list([<<"SUNION">> | Keys])).
 
 %% @doc compute the union between the sets and save the 
 %% resulting to new set
-%% NOTE: MUST single mode
 %% O(n)
 -spec set_union_store(Dst :: key(), Keys :: [key()]) ->
     'ok' | error().
 set_union_store(Dst, Keys) ->
-    ?MUST_SINGLE,
-    call_single_client(mbulk_list([<<"SUNIONSTORE">>, Dst | Keys])).
+    call(mbulk_list([<<"SUNIONSTORE">>, Dst | Keys])).
 
 %% @doc return the difference between the First set and all the other sets
-%% NOTE: MUST single mode
 %% o(n)
 -spec set_diff(First :: key(), Keys :: [key()]) ->
     [value()].
 set_diff(First, Keys) ->
-    ?MUST_SINGLE,
-    call_single_client(mbulk_list([<<"SDIFF">>, First | Keys])).
+    call(mbulk_list([<<"SDIFF">>, First | Keys])).
 
 %% @doc compute the difference between the sets and save the 
 %% resulting to new set
-%% NOTE: MUST single mode
 %% O(n)
 -spec set_diff_store(Dst :: key(), First :: key(), Keys :: [key()]) ->
     'ok' | error().
 set_diff_store(Dst, First, Keys) ->
-    ?MUST_SINGLE,
-    call_single_client(mbulk_list([<<"SDIFFSTORE">>, Dst, First | Keys])).  
+    call(mbulk_list([<<"SDIFFSTORE">>, Dst, First | Keys])).  
 
 %% @doc return all the members in the set
 %% O(1)
 -spec set_members(Key :: key()) ->
     [value()].
 set_members(Key) ->
-    call_key(Key, mbulk(<<"SMEMBERS">>, Key)).
+    call(mbulk(<<"SMEMBERS">>, Key)).
 
 %% @doc return a random member from the set
 %% O(1)
 -spec set_random_member(Key :: key()) ->
     value().
 set_random_member(Key) ->
-    call_key(Key, mbulk(<<"SRANDMEMBER">>, Key)).
+    call(mbulk(<<"SRANDMEMBER">>, Key)).
 
 %%------------------------------------------------------------------------------
 %% sorted set commands 
@@ -651,7 +560,7 @@ set_random_member(Key) ->
 -spec zset_add(Key :: key(), Mem :: str(), Score :: score()) ->
     boolean().
 zset_add(Key, Mem, Score) ->
-    R = call_key(Key, mbulk(<<"ZADD">>, Key, ?N2S(Score), Mem)),
+    R = call(mbulk(<<"ZADD">>, Key, ?N2S(Score), Mem)),
     int_may_bool(R).
 
 %% @doc remove the specified member from the sorted set
@@ -659,7 +568,7 @@ zset_add(Key, Mem, Score) ->
 -spec zset_rm(Key :: key(), Mem :: str()) ->
     boolean().
 zset_rm(Key, Mem) ->
-    R = call_key(Key, mbulk(<<"ZREM">>, Key, Mem)),
+    R = call(mbulk(<<"ZREM">>, Key, Mem)),
     int_may_bool(R).
 
 %% @doc If the member already exists increase its score, 
@@ -668,7 +577,7 @@ zset_rm(Key, Mem) ->
 -spec zset_incr(Key :: key(), Mem :: str(), N :: integer()) ->
     score().
 zset_incr(Key, Mem, N) ->
-    R = call_key(Key, mbulk(<<"ZINCRBY">>, Key, ?N2S(N), Mem)),
+    R = call(mbulk(<<"ZINCRBY">>, Key, ?N2S(N), Mem)),
     string_to_score(R).
 
 %% @doc return the index(rank) of member in the sorted set, the scores being
@@ -678,7 +587,7 @@ zset_incr(Key, Mem, N) ->
 -spec zset_index(Key :: key(), Mem :: key()) ->
     integer().
 zset_index(Key, Mem) ->
-    call_key(Key, mbulk(<<"ZRANK">>, Key, Mem)).
+    call(mbulk(<<"ZRANK">>, Key, Mem)).
 
 %% @doc return the index(rank) of member in the sorted set, the scores being 
 %% ordered from high to low
@@ -687,7 +596,7 @@ zset_index(Key, Mem) ->
 -spec zset_reverse_index(Key :: key(), Mem :: key()) ->
     integer().
 zset_reverse_index(Key, Mem) ->
-    call_key(Key, mbulk(<<"ZREVRANK">>, Key, Mem)).
+    call(mbulk(<<"ZREVRANK">>, Key, Mem)).
 
 %% @doc return a range of elements from the sorted set
 %% O(log(N))+O(M)
@@ -712,10 +621,10 @@ zset_range_index_reverse(Key, Start, End, WithScore) ->
 zset_range_score(Key, Min, Max, WithScore) ->
     case WithScore of
         false ->
-            call_key(Key, mbulk(<<"ZRANGEBYSCORE">>, Key, 
+            call(mbulk(<<"ZRANGEBYSCORE">>, Key, 
                 score_to_string(Min), score_to_string(Max)));
         true ->
-            L = call_key(Key, mbulk_list([<<"ZRANGEBYSCORE">>, Key, 
+            L = call(mbulk_list([<<"ZRANGEBYSCORE">>, Key, 
                 score_to_string(Min), score_to_string(Max), <<"WITHSCORES">>])),
             list_to_kv_tuple(L, fun(S) -> string_to_score(S) end)
     end.
@@ -726,7 +635,7 @@ zset_range_score(Key, Min, Max, WithScore) ->
 zset_range_score(Key, Min, Max, Start, Count, WithScore) ->
     case WithScore of
         false ->
-            call_key(Key, mbulk_list([<<"ZRANGEBYSCORE">>, Key, 
+            call(mbulk_list([<<"ZRANGEBYSCORE">>, Key, 
                 score_to_string(Min), 
                 score_to_string(Max),
                 <<"LIMIT">>,
@@ -734,7 +643,7 @@ zset_range_score(Key, Min, Max, Start, Count, WithScore) ->
                 ?N2S(Count)
                 ]));
         true ->
-            L = call_key(Key, mbulk_list([<<"ZRANGEBYSCORE">>, Key, 
+            L = call(mbulk_list([<<"ZRANGEBYSCORE">>, Key, 
                 score_to_string(Min), 
                 score_to_string(Max),
                 <<"LIMIT">>,
@@ -745,38 +654,49 @@ zset_range_score(Key, Min, Max, Start, Count, WithScore) ->
             list_to_kv_tuple(L, fun(S) -> string_to_score(S) end)
     end.
 
-%% @doc remove the elements in the sorted set with index between start and end
-%% Redis >= 1.3.4
--spec zset_rm_by_index(Key :: key(), Start :: index(), End :: index()) ->
-    integer().
-zset_rm_by_index(Key, Start, End) ->
-    call_key(Key, mbulk(<<"ZREMRANGEBYRANK">>, Key, ?N2S(Start), ?N2S(End))).
-
-%% @doc remove the elements in the sorted set with score between start and end
-%% Redis >= 1.1
--spec zset_rm_by_score(Key :: key(), Min :: score(), Max :: score()) ->
-    integer().
-zset_rm_by_score(Key, Min, Max) ->
-    call_key(Key, mbulk(<<"ZREMRANGEBYSCORE">>, Key, ?N2S(Min), ?N2S(Max))).
-
 %% @doc return the number of elements in sorted set
 -spec zset_len(Key :: key()) ->
     integer().
 zset_len(Key) ->
-    call_key(Key, mbulk(<<"ZCARD">>, Key)).
+    call(mbulk(<<"ZCARD">>, Key)).
 
 %% @doc return the score of the element
 -spec zset_score(Key :: key(), Mem :: key()) ->
     'null' | score().
 zset_score(Key, Mem) ->
-    call_key(Key, mbulk(<<"ZSCORE">>, Key, Mem)).
+    call(mbulk(<<"ZSCORE">>, Key, Mem)).
 
-%% Redis >= 1.3.5
-zset_union(_) ->
-    not_impl.
-%% Redis >= 1.3.5
-zset_inter(_) ->
-    not_impl.
+%% @doc remove the elements in the sorted set with index between start and end
+-spec zset_rm_by_index(Key :: key(), Start :: index(), End :: index()) ->
+    integer().
+zset_rm_by_index(Key, Start, End) ->
+    call(mbulk(<<"ZREMRANGEBYRANK">>, Key, ?N2S(Start), ?N2S(End))).
+
+%% @doc remove the elements in the sorted set with score between start and end
+-spec zset_rm_by_score(Key :: key(), Min :: score(), Max :: score()) ->
+    integer().
+zset_rm_by_score(Key, Min, Max) ->
+    call(mbulk(<<"ZREMRANGEBYSCORE">>, Key, ?N2S(Min), ?N2S(Max))).
+
+%% @doc return the intersection between the sorted sets, and save the 
+%% resulting to new sorted set.
+-spec zset_union_store(key(), [key()]) ->
+    integer().
+zset_union_store(Dst, Keys) ->
+    call(mbulk_list([<<"ZUNION">>, Dst, length(Keys) | Keys])).
+
+zset_union_store(Dst, Keys, Weights, Aggregate) ->
+    do_zset_store(<<"ZUNION">>, Dst, Keys, Weights, Aggregate).
+
+%% @doc calculate the intersection between the sorted sets, and save the
+%% resulting to new sroted set with the key Dst.
+-spec zset_inter_store(key(), [key()]) ->
+    integer().
+zset_inter_store(Dst, Keys) ->
+    call(mbulk_list([<<"ZINTER">>, Dst, length(Keys) | Keys])).
+
+zset_inter_store(Dst, Keys, Weights, Aggregate) ->
+    do_zset_store(<<"ZINTER">>, Dst, Keys, Weights, Aggregate).
 
 %%------------------------------------------------------------------------------
 %% hash commands 
@@ -787,7 +707,7 @@ zset_inter(_) ->
 -spec hash_set(Key :: key(), field(), Val :: str()) ->
     boolean().
 hash_set(Key, Field, Val) ->
-    R = call_key(Key, mbulk(<<"HSET">>, Key, Field, Val)),
+    R = call(mbulk(<<"HSET">>, Key, Field, Val)),
     int_may_bool(R).
 
 %% @doc set specified hash filed with Val, 
@@ -795,7 +715,7 @@ hash_set(Key, Field, Val) ->
 %% O(1)
 -spec hash_set_not_exists(key(), field(), str()) -> boolean().
 hash_set_not_exists(Key, Field, Val) ->
-    R = call_key(Key, mbulk(<<"HSETNX">>, Key, Field, Val)),
+    R = call(mbulk(<<"HSETNX">>, Key, Field, Val)),
     int_may_bool(R).
 
 
@@ -805,14 +725,14 @@ hash_set_not_exists(Key, Field, Val) ->
 -spec hash_multi_set(key(), [{field(), str()}]) -> 'ok'.
 hash_multi_set(Key, FieldVals) ->
     L = [<<"HMSET">>, Key | lists:append([[F, V] || {F, V} <- FieldVals])],
-    call_key(Key, mbulk_list(L)).
+    call(mbulk_list(L)).
 
 %% @doc retrieve the value of the specified hash field
 %% O(1)
 -spec hash_get(Key :: key(), Field :: field()) ->
     value().
 hash_get(Key, Field) ->
-    call_key(Key, mbulk(<<"HGET">>, Key, Field)).
+    call(mbulk(<<"HGET">>, Key, Field)).
 
 
 %% @doc get the values of all specified fields
@@ -820,7 +740,7 @@ hash_get(Key, Field) ->
 -spec hash_multi_get(key(), [field()]) ->
     [value() | 'null'].
 hash_multi_get(Key, Fields) ->
-    call_key(Key, mbulk_list([<<"HMGET">>, Key | Fields])).
+    call(mbulk_list([<<"HMGET">>, Key | Fields])).
 
 
 %% @doc If the field already exists increase its score, 
@@ -829,14 +749,14 @@ hash_multi_get(Key, Fields) ->
 -spec hash_incr(key(), field(), integer()) ->
     score().
 hash_incr(Key, Field, N) ->
-    call_key(Key, mbulk(<<"HINCRBY">>, Key, Field, ?N2S(N))).
+    call(mbulk(<<"HINCRBY">>, Key, Field, ?N2S(N))).
 
 %% @doc remove the sepcified field from the hash
 %% O(1)
 -spec hash_del(Key :: key(), Field :: field()) ->
     boolean().
 hash_del(Key, Field) ->
-    R = call_key(Key, mbulk(<<"HDEL">>, Key, Field)),
+    R = call(mbulk(<<"HDEL">>, Key, Field)),
     int_may_bool(R).
 
 %% @doc test if the field exists in the hash
@@ -844,30 +764,30 @@ hash_del(Key, Field) ->
 -spec hash_exists(Key :: key(), Field :: field()) ->
     boolean().
 hash_exists(Key, Field) ->
-    R = call_key(Key, mbulk(<<"HEXISTS">>, Key, Field)),
+    R = call(mbulk(<<"HEXISTS">>, Key, Field)),
     int_may_bool(R).
 
 %% @doc return the number of items in hash
 %% O(1)
 -spec hash_len(Key :: key()) -> integer().
 hash_len(Key) ->
-    call_key(Key, mbulk(<<"HLEN">>, Key)).
+    call(mbulk(<<"HLEN">>, Key)).
 
 %% @doc return all the fields in hash
 %% O(n)
 -spec hash_keys(Key :: key()) -> [value()].
 hash_keys(Key) ->
-    call_key(Key, mbulk(<<"HKEYS">>, Key)).
+    call(mbulk(<<"HKEYS">>, Key)).
 
 %% @doc return all the values in hash
 -spec hash_vals(Key :: key()) -> [value()].
 hash_vals(Key) ->
-    call_key(Key, mbulk(<<"HVALS">>, Key)).
+    call(mbulk(<<"HVALS">>, Key)).
 
 %% @doc return a tuple list include both the fields and values in hash
 -spec hash_all(key()) -> [tuple()].
 hash_all(Key) ->
-    KFList = call_key(Key, mbulk(<<"HGETALL">>, Key)),
+    KFList = call(mbulk(<<"HGETALL">>, Key)),
     list_to_kv_tuple(KFList).
 
 %%------------------------------------------------------------------------------
@@ -935,7 +855,7 @@ sort(Key, SortOpt) ->
     end,
 
     L = 
-    call_key(Key, mbulk_list([<<"SORT">>, Key | 
+    call(mbulk_list([<<"SORT">>, Key | 
         lists:append([ByPart, LimitPart, GetPart, AscPart, AlphaPart, StorePart])
     ])),
     list_to_n_tuple(L, FieldCount).
@@ -945,27 +865,20 @@ sort(Key, SortOpt) ->
 %%------------------------------------------------------------------------------
 
 %% @doc transaction begin
--spec trans_begin() -> trans_handler() | {'error', any()}.
-trans_begin() when PContext =:= ?CONTEXT_NORMAL ->
-    ?MUST_SINGLE,
-    {ok, [Client]} = redis_manager:get_clients(PManager),
-    case redis_client:send(Client, mbulk(<<"MULTI">>)) of
-        ok ->
-            redis_app:trans_handler(PManager, PGroup, PSType, Client);
-        E ->
-            {error, E}
-    end.
+-spec trans_begin() -> 'ok' | {'error', any()}.
+trans_begin() ->
+    call(mbulk(<<"MULTI">>)).
 
 %% @doc transaction commit
 -spec trans_commit() -> [any()].
-trans_commit() when PContext =:= ?CONTEXT_TRANS ->
-    redis_client:send(PClient, mbulk(<<"EXEC">>)).
+trans_commit() ->
+    call(mbulk(<<"EXEC">>)).
 
 %% @doc transaction discard
 -spec trans_abort() ->
     'ok'.
-trans_abort() when PContext =:= ?CONTEXT_TRANS ->
-    redis_client:send(PClient, mbulk(<<"DISCARD">>)).
+trans_abort() ->
+    call(mbulk(<<"DISCARD">>)).
 
 %%------------------------------------------------------------------------------
 %% persistence commands 
@@ -974,32 +887,27 @@ trans_abort() when PContext =:= ?CONTEXT_TRANS ->
 %% @doc synchronously save the DB on disk
 -spec save() -> 'ok' | error().
 save() ->
-    {_Replies, BadServers} = call_clients(mbulk(<<"SAVE">>)),
-    ?MULTI_REPLY_OK.
+    call(mbulk(<<"SAVE">>)).
 
 %% @doc save the DB in background
 -spec bg_save() -> 'ok' | error().
 bg_save() ->
-    {_Replies, BadServers} = call_clients(mbulk(<<"BGSAVE">>)),
-    ?MULTI_REPLY_OK.
+    call(mbulk(<<"BGSAVE">>)).
 
 %% @doc return the UNIX time that the last DB save excuted with success
--spec lastsave_time() -> timestamp() | [{atom(), timestamp()}].
+-spec lastsave_time() -> timestamp().
 lastsave_time() ->
-    {Replies, _BadServers} = call_clients(mbulk(<<"LASTSAVE">>)),
-    case PSType of
-        single ->
-            [{_, Time}] = Replies,
-            Time;
-        _ ->
-            Replies
-    end.
+    call(mbulk(<<"LASTSAVE">>)).
+
+%% @doc synchronously save the DB on disk, then shutdown the server
+-spec shutdown() -> 'ok' | {'error', any()}.
+shutdown() ->
+    redis_client:shutdown(PClient).
 
 %% @doc rewrite the append only log in background
 -spec bg_rewrite_aof() -> 'ok' | error().
 bg_rewrite_aof() ->
-    {_Replies, BadServers} = call_clients(mbulk(<<"BGREWRITEAOF">>)),
-    ?MULTI_REPLY_OK.
+    call(mbulk(<<"BGREWRITEAOF">>)).
 
 %%------------------------------------------------------------------------------
 %% remote server control commands 
@@ -1007,12 +915,11 @@ bg_rewrite_aof() ->
 %% @doc return the info about the server
 -spec info() -> [{atom(), value()}].
 info() ->
-    {Replies, _BadServers} = call_clients(mbulk(<<"INFO">>)),
-    Replies.
+    call(mbulk(<<"INFO">>)).
 
-%% @doc unknown commands
-%command(Args) ->
-%    [].
+%% @doc other unknown commands
+command(Args) ->
+    call(mbulk_list(Args)).
 
 %%------------------------------------------------------------------------------
 %%
@@ -1024,77 +931,24 @@ info() ->
 do_zset_range_index(Cmd, Key, Start, End, WithScore) ->
     case WithScore of
         true ->
-            L = call_key(Key, mbulk_list([Cmd, Key, ?N2S(Start), ?N2S(End), <<"WITHSCORES">>])),
+            L = call(mbulk_list([Cmd, Key, ?N2S(Start), ?N2S(End), <<"WITHSCORES">>])),
             list_to_kv_tuple(L, fun(S) -> string_to_score(S) end);
         false ->
-            call_key(Key, mbulk(Cmd, Key, ?N2S(Start), ?N2S(End)))
+            call(mbulk(Cmd, Key, ?N2S(Start), ?N2S(End)))
     end.
 
-%% do the call to the server the key belong to
-call_key(Key, Cmd) when PContext =:= ?CONTEXT_NORMAL ->
-    {ok, Client} = redis_manager:get_client(PManager, Key),
-    redis_client:send(Client, Cmd);
-call_key(_Key, Cmd) when PContext =:= ?CONTEXT_TRANS ->
-    ?MUST_SINGLE,
+do_zset_store(Cmd, Dst, Keys, Weights, Aggregate) when
+        Aggregate =:= sum;
+        Aggregate =:= min;
+        Aggregate =:= max ->
+    call(mbulk_list([Cmd, Dst, length(Keys) | 
+                (Keys 
+                    ++ [<<"WEIGHTS">> | Weights] 
+                    ++ [<<"AGGREGATE">>, aggregate_to_str(Aggregate)])]
+        )).
+
+call(Cmd) ->
     redis_client:send(PClient, Cmd).
-
-%% do the call to the single client for single server mode
-call_single_client(Cmd) when PContext =:= ?CONTEXT_NORMAL ->
-    {ok, [Client]} = redis_manager:get_clients(PManager),
-    redis_client:send(Client, Cmd);
-call_single_client(Cmd) when PContext =:= ?CONTEXT_TRANS ->
-    redis_client:send(PClient, Cmd).
-
-%% do the call to the all servers 
-call_clients(Cmd) when PContext =:= ?CONTEXT_NORMAL ->
-    {ok, Clients} = redis_manager:get_clients(PManager),
-    redis_client:multi_send(Clients, Cmd);
-call_clients(Cmd) when PContext =:= ?CONTEXT_TRANS ->
-    ?MUST_SINGLE,
-    redis_client:multi_send([PClient], Cmd).
-
-%% do the call to any one server
-call_any(Cmd, F) when PContext =:= ?CONTEXT_NORMAL ->
-    {ok, Clients} = redis_manager:get_clients(PManager),
-    ?DEBUG2("call any send cmd ~p by clients:~p", [Cmd, Clients]),
-    [V | _] =
-    [begin
-        Ret = redis_client:send(Client, Cmd),
-        case F(Ret) of
-            true ->
-                throw(Ret);
-            false ->
-                Ret
-        end
-    end || Client <- Clients],
-    V;
-call_any(Cmd, _F) when PContext =:= ?CONTEXT_TRANS ->
-    ?MUST_SINGLE,
-    redis_client:send(PClient, Cmd).
-
-%% do the multiple keys call, partition the keys to servers
-call_partition_keys(Type, KeyList, KFun) when PContext =:= ?CONTEXT_NORMAL ->
-    ClientKeys = redis_manager:partition_keys(PManager, KeyList, KFun),
-    [begin
-        KeysPart = 
-        case KFun of
-            ?FUN_NULL ->
-                KLPart;
-            _ ->
-                [KFun(KEntry) || KEntry <- KLPart]
-        end,
-        Cmd = mbulk_list([Type | KeysPart]),
-        Replies = redis_client:send(Client, Cmd),
-        case KFun of
-            ?FUN_NULL ->
-                Replies;
-            _ ->
-                lists:zip(KLPart, Replies)
-        end
-    end || {Client, KLPart} <- ClientKeys];
-call_partition_keys(Type, KeyList, _KFun) when PContext =:= ?CONTEXT_TRANS ->
-    ?MUST_SINGLE,
-    redis_client:send(PClient, mbulk_list([Type | KeyList])).
 
 %% convert score to string
 score_to_string(S) when is_integer(S) ->
@@ -1179,6 +1033,10 @@ list_to_n_tuple(L, N) when N > 1 ->
         end,
     {1, [], []}, L),
     lists:reverse(AccL).
+
+aggregate_to_str(sum) -> <<"SUM">>;
+aggregate_to_str(min) -> <<"MIN">>;
+aggregate_to_str(max) -> <<"MAX">>.
 
 %%
 %% unit test
