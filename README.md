@@ -33,16 +33,17 @@ a simple redis client accrodding to the redis protocol. we will go along with th
 
 the erl-redis now support all the commands in redis-1.3.5, all the commands now implemented with
 the new mbulk protocol. we have complete the follow commands:
-1) generic commands
-#) string commands
-#) list commands
-#) set commands
-#) sorted set commands
-#) hash commands
-#) transaction(MULT/DISCARD/EXEC) commands
-#) sort commands
-#) pubsub commands
-#) persistence commands
+
+ * generic commands
+ * string commands
+ * list commands
+ * set commands
+ * sorted set commands
+ * hash commands
+ * transaction(MULT/DISCARD/EXEC) commands
+ * sort commands
+ * pubsub commands
+ * persistence commands
 
 all the API is in the src/redis.erl.
 
