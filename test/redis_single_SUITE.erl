@@ -3,7 +3,7 @@
 %% Note: This directive should only be used in test suites.
 -compile(export_all).
 
--include("ct.hrl").
+-include_lib("common_test/include/ct.hrl").
 
 suite() -> [
     {timetrap,{minutes,2}}
