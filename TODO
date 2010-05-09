@@ -4,7 +4,7 @@ redis.erl
 redis_client_sup.erl
 
 you can use the redis_client.erl singlely.
-e.g 1(no registered name)
+e.g. 1(no registered name)
     {ok, Pid} = redis_client:start(Host, Port, Pass)
     %{ok, Pid} = redis_client:start_link(Host, Port, Pass)
     Redis = redics_client:handler(Pid),

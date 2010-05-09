@@ -123,19 +123,19 @@ send(Client, Data) ->
     %fun([channel(), count()] -> any())) ->
         'ok'.
 subscribe(Client, Channels, CbSub, CbMsg) ->
-    ?DEBUG2("subscribe to channels:~p", [Channels]),
+    %?DEBUG2("subscribe to channels:~p", [Channels]),
     Cmd = redis_proto:mbulk_list([<<"subscribe">> | Channels]),
     gen_server:call(Client, {subscribe, Cmd, CbSub, CbMsg}).
 
 -spec unsubscribe(client(), fun()) -> 'ok'.
 unsubscribe(Client, Callback) ->
-    ?DEBUG2("subscribe to all channels", []),
+    %?DEBUG2("subscribe to all channels", []),
     Cmd = redis_proto:mbulk(<<"unsubscribe">>),
     gen_server:call(Client, {unsubscribe, Cmd, Callback}).
 
 -spec unsubscribe(client(), [channel()], fun()) -> 'ok'.
 unsubscribe(Client, Channels, Callback) ->
-    ?DEBUG2("subscribe to channels:~p", [Channels]),
+    %?DEBUG2("subscribe to channels:~p", [Channels]),
     Cmd = redis_proto:mbulk_list([<<"unsubscribe">> | Channels]),
     gen_server:call(Client, {unsubscribe, Cmd, Callback}).
 
@@ -297,8 +297,7 @@ do_send(Sock, Data) ->
 do_recv(Sock, PState) ->
     receive 
         {tcp, Sock, Packet} ->
-            ?DEBUG2("receive packet :~p", [Packet]),
-            %?DEBUG2("active :~p", [inet:getopts(Sock, [active])]),
+            %?DEBUG2("receive packet :~p", [Packet]),
             do_handle_packet(Sock, Packet, PState);
         {tcp_closed, _Socket} ->
             ?ERROR2("socket closed by remote peer", []),
@@ -339,7 +338,7 @@ do_callback(Fun, Arg1, Arg2) when is_function(Fun, 2) ->
 do_handle_packet(Sock, Packet, PState) ->
     case redis_proto:parse_reply(Packet) of
         {mbulk_more, MB} when PState =:= null -> % multi bulk replies
-            ?DEBUG2("need recv mbulk :~p", [MB]),
+            %?DEBUG2("need recv mbulk :~p", [MB]),
             recv_bulks(Sock, MB);
         {bulk_more, N} -> % bulk reply
             %?DEBUG2("need recv bulk data len:~p", [N]),

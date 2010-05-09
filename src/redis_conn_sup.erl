@@ -3,7 +3,7 @@
 %%% @copyright erl-redis 2010
 %%%
 %%% @author litao cheng <litaocheng@gmail.com>
-%%% @doc redis connection supervisor
+%%% @doc redis client connection supervisor
 %%% @end
 %%%
 %%%----------------------------------------------------------------------
@@ -15,7 +15,7 @@
 -behaviour(supervisor).
 
 -export([start_link/0]).
--export([connect/5]).
+-export([connect/3, connect/4]).
 -export([init/1]).
 
 
@@ -27,8 +27,12 @@ start_link() ->
     supervisor:start_link({local, ?CONN_SUP}, ?MODULE, []).
 
 %% @doc start an new redis_client process connect the specify redis server
-connect(Host, Port, Index, Timeout, Passwd) ->
-    supervisor:start_child(?CONN_SUP, [{Host, Port}, Index, Timeout, Passwd]).
+connect(Host, Port, Passwd) ->
+    supervisor:start_child(?CONN_SUP, [Host, Port, Passwd]).
+
+%% @doc start an new redis_client process connect the specify redis server
+connect(Host, Port, Passwd, Name) ->
+    supervisor:start_child(?CONN_SUP, [Host, Port, Passwd, Name]).
 
 %% @doc the connection supervisor callback
 init([]) -> 

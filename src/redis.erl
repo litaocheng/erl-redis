@@ -58,6 +58,9 @@
 %% transaction commands
 -export([trans_begin/0, trans_commit/0, trans_abort/0]).
 
+%% pubsub commands
+-export([subscribe/3, unsubscribe/1, unsubscribe/2, publish/2]).
+
 %% persistence commands
 -export([save/0, bg_save/0, lastsave_time/0, shutdown/0, bg_rewrite_aof/0]).
 
@@ -883,6 +886,31 @@ trans_commit() ->
     'ok'.
 trans_abort() ->
     call(mbulk(<<"DISCARD">>)).
+
+%% @doc subscribe to channels
+-spec subscribe([channel()], fun(), fun()) ->
+    'ok'.
+subscribe(Channels, CbSub, CbMsg) ->
+    redis_client:subscribe(PClient, Channels, CbSub, CbMsg).
+
+%% @doc unsubscribe to all channels
+-spec unsubscribe(fun()) ->
+    'ok'.
+unsubscribe(CbUnSub) ->
+    redis_client:unsubscribe(PClient, CbUnSub).
+
+%% @doc unsubscribe some channels
+-spec unsubscribe([channel()], fun()) ->
+    'ok'.
+unsubscribe(Channels, CbUnSub) ->
+    redis_client:unsubscribe(PClient, Channels, CbUnSub).
+
+%% @doc publish message to channel
+-spec publish(channel(), str()) ->
+    count().
+publish(Channel, Msg) ->
+    call(mbulk(<<"PUBLISH">>, Channel, Msg)).
+
 
 %%------------------------------------------------------------------------------
 %% persistence commands 

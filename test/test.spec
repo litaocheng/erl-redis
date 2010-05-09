@@ -1,1 +1,1 @@
-{suites, ".", redis_SUITE}.
+{suites, ".", [redis_SUITE, redis_pubsub_SUITE]}.
