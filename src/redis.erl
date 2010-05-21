@@ -690,20 +690,20 @@ zset_rm_by_score(Key, Min, Max) ->
 -spec zset_union_store(key(), [key()]) ->
     integer().
 zset_union_store(Dst, Keys) ->
-    call(mbulk_list([<<"ZUNION">>, Dst, length(Keys) | Keys])).
+    call(mbulk_list([<<"ZUNIONSTORE">>, Dst, length(Keys) | Keys])).
 
 zset_union_store(Dst, Keys, Weights, Aggregate) ->
-    do_zset_store(<<"ZUNION">>, Dst, Keys, Weights, Aggregate).
+    do_zset_store(<<"ZUNIONSTORE">>, Dst, Keys, Weights, Aggregate).
 
 %% @doc calculate the intersection between the sorted sets, and save the
 %% resulting to new sroted set with the key Dst.
 -spec zset_inter_store(key(), [key()]) ->
     integer().
 zset_inter_store(Dst, Keys) ->
-    call(mbulk_list([<<"ZINTER">>, Dst, length(Keys) | Keys])).
+    call(mbulk_list([<<"ZINTERSTORE">>, Dst, length(Keys) | Keys])).
 
 zset_inter_store(Dst, Keys, Weights, Aggregate) ->
-    do_zset_store(<<"ZINTER">>, Dst, Keys, Weights, Aggregate).
+    do_zset_store(<<"ZINTERSTORE">>, Dst, Keys, Weights, Aggregate).
 
 %%------------------------------------------------------------------------------
 %% hash commands 
