@@ -92,6 +92,41 @@ e.g. 4 (use in OTP with connection pool)
     Redis:set("k1", "v1"),
     Redis:get("k1").
 
+## Benchmark
+in my laptop, 
+CPU: Intel(R) Core(TM)2 Duo CPU T5870)
+OS: ubuntu 10.04
+redis_version:2.1.1
+arch_bits:32
+run the test/redis-benchmark, the benchmark result is:
+
+    ./redis-benchmark -s localhost -n 10000 -c 10 -o 10
+    usage:
+     redis-benchmark [options]
+      -s Server   - the redis server
+      -p Port     - the redis server port (default 6379) 
+      -c Clients  - the concurrent request client number (default 5) 
+      -n Count    - the total requests count (default 10000) 
+      -o Pool     - the connection pool size (default 5) 
+
+    ===== "PING" ======
+    10000 requests completed in 0.50 s
+    20130 requests per second
+    ===== "SET" ======
+    10000 requests completed in 0.67 s
+    14907 requests per second
+    ===== "GET" ======
+    10000 requests completed in 0.68 s
+    14669 requests per second
+    ===== "INCR" ======
+    10000 requests completed in 0.65 s
+    15444 requests per second
+    ===== "LPUSH" ======
+    10000 requests completed in 0.50 s
+    20158 requests per second
+    ===== "LPOP" ======
+    10000 requests completed in 0.64 s
+    15726 requests per second
 
 ## Version
 the erl-redis version is synchronous with redis server version. 
