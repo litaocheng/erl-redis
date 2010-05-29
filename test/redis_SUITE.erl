@@ -318,7 +318,12 @@ test_persistence(Config) ->
     ?PF(Redis:bg_save()),
     ?PF(Redis:lastsave_time()),
     ?PF(Redis:info()),
+    ok = ?PF(Redis:slave_off()),
+    ok = ?PF(Redis:slave_of("localhost", 16379)),
     ?PF(Redis:bg_rewrite_aof()),
+    [{_, _} | _] = ?PF(Redis:config_get("*")),
+    ok = ?PF(Redis:config_set("save", [{3600, 100}, {60, 10000}])),
+    ok = ?PF(Redis:config_set("maxmemory", "2000000000")),
     ok.
 
 bool(true) -> ok;

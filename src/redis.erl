@@ -66,7 +66,7 @@
 -export([save/0, bg_save/0, lastsave_time/0, shutdown/0, bg_rewrite_aof/0]).
 
 %% remote server commands
--export([info/0]).
+-export([info/0, slave_off/0, slave_of/2, config_get/1, config_set/2]).
 
 %% other unknown commands
 -export([command/1]).
@@ -966,6 +966,41 @@ bg_rewrite_aof() ->
 info() ->
     call(mbulk(<<"INFO">>)).
 
+%% @doc make the redis from slave into a master instance 
+-spec slave_off() -> 'ok'.
+slave_off() ->
+    call(mbulk(<<"SLAVEOF">>, <<"no">>, <<"one">>)).
+
+%% @doc change the slave's master to Host:Port (the old data will be discraded)
+%% FIXME it seems in redis-2.0 the salveof command always return ok
+-spec slave_of(iolist(), integer()) -> 'ok'.
+slave_of(Host, Port) when 
+    (is_list(Host) orelse is_binary(Host)),
+    is_integer(Port) ->
+    call(mbulk(<<"SLAVEOF">>, Host, ?N2S(Port))).
+
+%% @doc retrieve the config info in running redis server
+-spec config_get(pattern()) -> 
+    [{binary(), any()}].
+config_get(Pattern) ->
+    KVList = call(mbulk(<<"CONFIG">>, <<"GET">>, Pattern)),
+    list_to_kv_tuple(KVList).
+
+%% @doc alter the config info in running redis server
+-spec config_set(string(), any()) -> 'ok'.
+config_set("save", L) ->
+    Str = entry_to_str(L),
+    call(mbulk(<<"CONFIG">>, <<"SET">>, <<"save">>, Str));
+config_set(Par, Val) when is_list(Par) ->
+    ValStr =
+    if is_integer(Val) ->
+            ?N2S(Val);
+        is_list(Val) ->
+            Val
+    end,
+    call(mbulk(<<"CONFIG">>, <<"SET">>, Par, ValStr)).
+
+
 %% @doc other unknown commands
 command(Args) ->
     call(mbulk_list(Args)).
@@ -1087,9 +1122,10 @@ aggregate_to_str(sum) -> <<"SUM">>;
 aggregate_to_str(min) -> <<"MIN">>;
 aggregate_to_str(max) -> <<"MAX">>.
 
-%%
-%% unit test
-%%
--ifdef(TEST).
-
--endif.
+%% convert [{200, 2}, {300, 4}] to 
+%% "200 2 300 4"
+entry_to_str(L) ->
+    L2 = 
+    [ lists:concat([Time, " ", Change])
+        || {Time, Change} <- L, is_integer(Time), is_integer(Change)],
+    string:join(L2, " ").
