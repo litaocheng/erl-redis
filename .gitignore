@@ -1,0 +1,7 @@
+ebin
+logs
+tags
+src/*.beam
+src/tags
+test/redis-insert
+
