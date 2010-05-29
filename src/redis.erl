@@ -1015,7 +1015,7 @@ int_may_bool(V) -> V.
 get_app_vsn() ->
     case application:get_application() of
         undefined ->
-            "0.2.6";
+            undefined;
         _ ->
             {ok, App} = application:get_application(),
             {ok, Vsn} = application:get_key(App, vsn),

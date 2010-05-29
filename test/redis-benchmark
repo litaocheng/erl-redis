@@ -13,40 +13,62 @@
     host = ?HOST, 
     port = ?PORT,
     clients = 5,
-    requests = 10000
+    requests = 10000,
+    pool = 5
     }).
 
 usage() ->
     io:format("usage:\n"),
     io:format(" redis-benchmark [options]\n"),
-    io:format("  -h Host     - the redis server (default localhost)\n"),
+    io:format("  -s Server   - the redis server\n"),
     io:format("  -p Port     - the redis server port (default 6379) \n"),
     io:format("  -c Clients  - the concurrent request client number (default 5) \n"),
     io:format("  -n Count    - the total requests count (default 10000) \n"),
+    io:format("  -o Pool     - the connection pool size (default 5) \n"),
     io:format("\n\n").
 
+main([]) ->
+    usage(),
+    halt(1);
 main(Args) ->
     usage(),
     Config = parse_args(Args),
-    %io:format("args is ~p", [Args]),
+    %io:format("args is ~p~n config is ~p~n", [Args, Config]),
     crypto:start(),
     code:add_path("../ebin"),
     true = erlang:system_info(smp_support),
-    redis_app:start(),
-    ok = redis_app:single_server(Config#config.host, Config#config.port, 16, "litao"),
-    %ok = redis:multi_servers([{Config#config.host, 6379, 1}, {Config#config.host, 6380, 1}], "litao"),
 
-    Redis = redis_app:client(single),
-    [do_bench(F, Config#config.requests, Config#config.clients, Title) ||
-        {F, Title} <- action_list(Redis)].
+    Host = Config#config.host,
+    Port = Config#config.port,
+    [begin
+        Name = redis_client:name(Host, Port, I),
+        {ok, _} = redis_client:start(Host, Port, "", Name)
+    end || I <- lists:seq(1, Config#config.pool)],
+    
+    Requests = Config#config.requests,
+    Clients = Config#config.clients,
+    FRedis = 
+    fun() ->
+        rand_redis(Host, Port, Config#config.pool)
+    end,
 
-do_bench(F, N, Conc, Title) ->
+    [do_bench(F, Requests, Clients, FRedis, Title) ||
+        {F, Title} <- action_list()].
+
+rand_redis(Host, Port, N) ->
+    Selected = redis_client:existing_name(Host, Port, random:uniform(N)),
+    %io:format("selected redis is ~p~n", [Selected]),
+    redis_client:handler(Selected).
+
+do_bench(F, N, Conc, FRedis, Title) ->
     NP = N div Conc,
     Parent = self(),
 
-    T1 = now(),
     % spawn the clients
-    Pids = [start_client(Parent, F, NP) || _ <- lists:duplicate(Conc, 0)],
+    Pids = [start_client(FRedis(), Parent, F, NP) || _ <- lists:duplicate(Conc, 0)],
+    T1 = now(),
+    % start the clients
+    [Pid ! {Parent, start} || Pid <- Pids],
     Counts = 
     [receive 
         {ack, P, CN} ->
@@ -62,30 +84,34 @@ do_bench(F, N, Conc, Title) ->
     io:format("~p requests per second\n", [round(N2/Second)]),
     ok.
 
-start_client(Parent, F, NP) ->
+start_client(Redis, Parent, F, NP) ->
     spawn(
     fun() ->
-        do_times(F, NP),
+        receive 
+            {Parent, start} ->
+                ok
+        end,
+        do_times(Redis, F, NP),
         Parent ! {ack, self(), NP}
     end).
 
-do_times(_F, 0) ->
+do_times(_Redis, _F, 0) ->
     ok;
-do_times(F, N) ->
-    case is_function(F, 0) of
+do_times(Redis, F, N) ->
+    case is_function(F, 1) of
         true ->
-            F();
+            F(Redis);
         false ->
-            F(integer_to_list(N))
+            F(Redis, integer_to_list(N))
     end,
-    do_times(F, N-1).
+    do_times(Redis, F, N-1).
 
 -define(F(Expr),
-    (fun() -> Expr end)).
+    (fun(Redis) -> Expr end)).
 
-action_list(Redis) ->
+action_list() ->
     [{?F(Redis:ping()), "PING"},
-     {fun(N) -> Redis:set("foo_rand000000000000", N) end, "SET"},
+     {fun(Redis, N) -> Redis:set("foo_rand000000000000", N) end, "SET"},
      {?F(Redis:get("foo_rand000000000000")), "GET"},
      {?F(Redis:incr("counter_rand000000000000")), "INCR"},
      {?F(Redis:list_push_head("mylist", <<"bar">>)), "LPUSH"},
@@ -95,14 +121,16 @@ action_list(Redis) ->
 parse_args(Args) ->
     parse_args(Args, #config{}).
 
-parse_args(["-h", Host | T], Config) ->
-    parse_args(T, Config#config{host = Host});
+parse_args(["-s", Server | T], Config) ->
+    parse_args(T, Config#config{host = Server});
 parse_args(["-p", Port | T], Config) ->
     parse_args(T, Config#config{port = list_to_integer(Port)});
 parse_args(["-c", Clients | T], Config) ->
     parse_args(T, Config#config{clients = list_to_integer(Clients)});
 parse_args(["-n", N | T], Config) ->
     parse_args(T, Config#config{requests = list_to_integer(N)});
+parse_args(["-o", N | T], Config) ->
+    parse_args(T, Config#config{pool = list_to_integer(N)});
 parse_args([_ | T], Config) ->
     parse_args(T, Config);
 parse_args([], Config) ->

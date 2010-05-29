@@ -30,6 +30,8 @@
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
                             terminate/2, code_change/3]).
+
+-compile({inline, [send/2]}).
                 
 -record(pubsub, {
         cb_sub,
@@ -48,9 +50,10 @@
     }).
 
 -define(TCP_OPTS, [inet, binary, {active, once}, 
-            {packet, line}, {nodelay, true},
-            {recbuf, 102400},
-            {sndbuf, 102400},
+            {packet, line}, 
+            {nodelay, false},
+            {recbuf, 16#1000},
+            {sndbuf, 16#10000},
             {send_timeout, 5000}, {send_timeout_close, true}]).
 
 -spec start(inet_host(), inet_port(), passwd()) ->
@@ -196,11 +199,11 @@ init({Server = {Host, Port}, Passwd}) ->
 handle_call({command, Data}, _From, 
         State = #state{sock = Sock, server = _Server, ctx = normal}) ->
     ?DEBUG2("redis client send data:~n~p~n\t=> ~p", [Data, _Server]),
-    ?DEBUG2(">>>inet options ~p>>>>", [inet:getopts(Sock, [packet, active])]),
+    %?DEBUG2(">>>inet options ~p>>>>", [inet:getopts(Sock, [packet, active])]),
     Reply = (catch do_send_recv(Data, Sock)),
     %ok = inet:setopts(Sock, [{active, once}]),
-    ?DEBUG2("message queue len:~p", [process_info(self(), message_queue_len)]),
-    ?DEBUG2("<<<inet options ~p<<<<", [inet:getopts(Sock, [packet, active])]),
+    %?DEBUG2("message queue len:~p", [process_info(self(), message_queue_len)]),
+    %?DEBUG2("<<<inet options ~p<<<<", [inet:getopts(Sock, [packet, active])]),
     ?DEBUG2("reply is: ~p", [Reply]),
     {reply, Reply, State};
 handle_call({command, _Data}, _From, State) ->
