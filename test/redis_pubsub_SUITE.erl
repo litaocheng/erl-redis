@@ -4,7 +4,8 @@
 
 -include_lib("common_test/include/ct.hrl").
 -include("redis_internal.hrl").
--define(P(F, D), ?INFO2(F++"\n", D)).
+-define(P(F, D), 
+    ct:log(default, F, D)).
     
 suite() -> [
     {timetrap,{minutes,2}}

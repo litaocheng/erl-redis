@@ -16,7 +16,7 @@ compile:
 
 test_compile: 
 	(mkdir -p ./ebin)
-	(cd src;$(MAKE) TEST=true)
+	(cd src;$(MAKE) TEST=true NOLOG=true)
 
 test: clean eunit comm_test 
 	@#(make clean)

@@ -4,12 +4,11 @@
 
 -include_lib("common_test/include/ct.hrl").
 -include("redis_internal.hrl").
--define(P(F, D), ?INFO2(F, D)).
-    
 -define(PF(F), 
     fun() ->
         V = F,
-        ?INFO2("~n~80..-s\ncall\t:\t~s~nresult\t:\t~p~n~80..=s~n~n", ["-", ??F, V, "="]),
+        %?INFO2("~n~80..-s\ncall\t:\t~s~nresult\t:\t~p~n~80..=s~n~n", ["-", ??F, V, "="]),
+        ct:log(default, "~n~80..-s\ncall\t:\t~s~nresult\t:\t~p~n~80..=s~n~n", ["-", ??F, V, "="]),
         V
     end()).
 
@@ -82,6 +81,19 @@ test_generic(Config) ->
     ok = ?PF(Redis:select(1)),
     catch ?PF(Redis:move("key333", 0)),
     ok = ?PF(Redis:select(0)),
+
+    % append
+    3 = ?PF(Redis:append("key_append", "one")),
+    6 = ?PF(Redis:append("key_append", "two")),
+
+    % substr
+    null = ?PF(Redis:substr("key_substr", 0, -1)),
+    Redis:set("key_substr", "This is a string"),
+    <<"This">> = ?PF(Redis:substr("key_substr", 0, 3)),
+    <<"ing">> = ?PF(Redis:substr("key_substr", -3, -1)),
+    <<"ing">> = ?PF(Redis:substr("key_substr", -3, -1)),
+    <<"This is a string">> = ?PF(Redis:substr("key_substr", 0, -1)),
+    <<" string">> = ?PF(Redis:substr("key_substr", 9, 100000)),
 
     ok = ?PF(Redis:flush_db()),
     ok = ?PF(Redis:flush_all()),
@@ -194,32 +206,40 @@ test_zset(Config) ->
 
 test_hash(Config) -> 
     Redis = ?config(redis_client, Config),
-    % Redis > 1.3.4
     true = ?PF(Redis:hash_set("myhash", "f1", "v1")),
     true = ?PF(Redis:hash_set_not_exists("myhash", "f11", "v11")),
     false = ?PF(Redis:hash_set_not_exists("myhash", "f11", "v11")),
 
-    ok = ?PF(Redis:hash_multi_set("myhash", [{"f11", "v11"}, {"f22", "v22"}])),
+    ok = ?PF(Redis:hash_multi_set("myhash", [{"f1", "v1"}, {"f2", "v2"}])),
     <<"v1">> = ?PF(Redis:hash_get("myhash", "f1")),
-    null = ?PF(Redis:hash_get("myhash", "f2")),
-    [<<"v11">>, <<"v22">>] = ?PF(Redis:hash_multi_get("myhash", ["f11", "f22"])),
-    [<<"v11">>, <<"v22">>, null] = ?PF(Redis:hash_multi_get("myhash", ["f11", "f22", "f00"])),
-    5 = ?PF(Redis:hash_incr("myhash", "f1", 5)),
-    Redis:hash_del("myhash", "f11"),
-    Redis:hash_del("myhash", "f22"),
+    null = ?PF(Redis:hash_get("myhash", "f_not_exist")),
+    [<<"v1">>, <<"v2">>] = ?PF(Redis:hash_multi_get("myhash", ["f1", "f2"])),
+    [<<"v1">>, <<"v2">>, null] = ?PF(Redis:hash_multi_get("myhash", ["f1", "f2", "f_not_exist"])),
+
+    % hash incr
+    {error, _} = ?PF(Redis:hash_incr("myhash", "f1", 5)),
+    5 = ?PF(Redis:hash_incr("myhash", "f_num", 5)),
 
     true = ?PF(Redis:hash_del("myhash", "f1")),
-    false = ?PF(Redis:hash_del("myhash", "f2")),
+    Redis:hash_del("myhash", "f11"),
+    true = ?PF(Redis:hash_del("myhash", "f2")),
+    false = ?PF(Redis:hash_del("myhash", "f_not_exist")),
+    true = Redis:hash_del("myhash", "f_num"),
 
-    % Redis >1.3.4
+    % hash exists
     true = ?PF(Redis:hash_set("myhash", "f1", "v1")),
-    ?PF(Redis:hash_exists("myhash", "f1")),
-    ?PF(Redis:hash_exists("myhash", "f2")),
-    true = ?PF(Redis:hash_set("myhash", "f2", "v2")),
+    false = ?PF(Redis:hash_exists("myhash", "f_not_exist")),
+    true = ?PF(Redis:hash_exists("myhash", "f1")),
+    
+    % hash len
     int(?PF(Redis:hash_len("myhash"))),
+
+    % hash keys/vals/all
+    Redis:hash_set(<<"myhash">>, "f2", <<"v2">>),
     [<<"f1">>, <<"f2">>] = ?PF(Redis:hash_keys("myhash")),
     [<<"v1">>, <<"v2">>] = ?PF(Redis:hash_vals("myhash")),
     [{<<"f1">>, <<"v1">>}, {<<"f2">>, <<"v2">>}] = ?PF(Redis:hash_all("myhash")),
+
     ok.
 
 test_sort(Config) ->

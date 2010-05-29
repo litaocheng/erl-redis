@@ -23,7 +23,8 @@
 
 %% string commands
 -export([set/2, set/3, get/1, getset/2, multi_get/1, not_exists_set/2, multi_set/1,
-        multi_set_not_exists/1, incr/1, incr/2, decr/1, decr/2]).
+        multi_set_not_exists/1, incr/1, incr/2, decr/1, decr/2,
+        append/2, substr/3]).
 
 %% list commands
 -export([list_push_tail/2, list_push_head/2, list_len/1, list_range/3, 
@@ -334,6 +335,22 @@ decr(Key) ->
     integer().
 decr(Key, N) ->
     call(mbulk(<<"DECRBY">>, Key, ?N2S(N))).
+
+%% @doc append the specified string to the string stored at key,
+%%      return the new string length
+%% O(1)
+-spec append(key(), value()) -> 
+    integer().
+append(Key, Str) ->
+    call(mbulk(<<"APPEND">>, Key, Str)).
+
+%% @doc return a substring of a larger string, both Start and End are inclusive
+%% O(1)
+-spec substr(key(), integer(), integer()) -> 
+    integer().
+substr(Key, Start, End) when is_integer(Start), is_integer(End) ->
+    call(mbulk(<<"SUBSTR">>, Key, ?N2S(Start), ?N2S(End))).
+
 
 %%------------------------------------------------------------------------------
 %% list commands

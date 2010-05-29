@@ -21,7 +21,7 @@
 -export([set_selected_db/2, get_selected_db/1]).
 -export([send/2]).
 -export([subscribe/4, unsubscribe/2, unsubscribe/3]).
--export([shutdown/1]).
+-export([quit/1, shutdown/1]).
 
 %% some untility functions
 -export([msg_send_cb/2]).
@@ -141,6 +141,11 @@ unsubscribe(Client, Channels, Callback) ->
     %?DEBUG2("subscribe to channels:~p", [Channels]),
     Cmd = redis_proto:mbulk_list([<<"unsubscribe">> | Channels]),
     gen_server:call(Client, {unsubscribe, Cmd, Callback}).
+
+-spec quit(client()) ->
+    'ok' | {'error', any()}.
+quit(Client) ->
+    gen_server:call(Client, {shutdown, <<"QUIT">>}).
 
 -spec shutdown(client()) ->
     'ok' | {'error', any()}.
