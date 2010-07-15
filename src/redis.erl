@@ -81,14 +81,14 @@
             Ret;
         [_|_] ->
             {error, Ret, BadServers}
-    end.
+    end).
 -define(MULTI_REPLY_OK,
     case BadServers of
         [] ->
             ok;
         [_|_] ->
             {error, BadServers}
-    end.
+    end).
 
 -define(CALL, redis_client:send(PClient)).
 

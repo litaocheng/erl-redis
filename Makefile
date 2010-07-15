@@ -27,7 +27,7 @@ eunit: test_compile
 comm_test: test_compile 
 	(mkdir -p ./test/log)
 	@echo "pwd is `pwd`"
-	(run_test -logdir `pwd`/test/log -include `pwd`/include -pa `pwd`/ebin -pa `pwd`/test -cover test/redis.coverspec -dir . -spec ./test/test.spec)
+	(erl -s ct_run script_start -logdir `pwd`/test/log -include `pwd`/include -pa `pwd`/ebin -pa `pwd`/test -cover test/redis.coverspec -dir . -spec ./test/test.spec -s erlang halt)
 
 edoc: 
 	(mkdir -p ./edoc)
