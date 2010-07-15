@@ -49,12 +49,12 @@
             end).
 
 %% the redis supervisor name
--define(REDIS_SUP, redis_sup).
 -define(CONN_SUP, redis_conn_sup).
 -define(CONN_TIMEOUT, 5000).
 -define(RECV_TIMEOUT, 2000).  
+-define(CONN_POOL_DEF, 5).
 -define(CONN_POOL_MIN, 1).
--define(CONN_POOL_MAX, 32).
+-define(CONN_POOL_MAX, 64).
 
 %% 
 %% about types and records

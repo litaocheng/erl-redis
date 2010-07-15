@@ -65,30 +65,46 @@ e.g. 2 (with registered name)
 
 e.g. 3 (use the redis in OTP)
     % in main supervisor:
-    {redis_client_sup, {redis_conn_sup, start_link, []},
+    {redis_conn_sup, {redis_conn_sup, start_link, []},
         permanent, 1000, supervisor, [redis_client]}
 
     % start a redis client:
     Name = redis_client:name(Host, Port),
-    {ok, _} = redis_cilent_sup:connect(Host, Port, Pass, Name),
+    {ok, _} = redis_conn_sup:connect(Host, Port, Pass, Name),
     Redis = redis_client:handler(Name),
     Redis:set("k1", "v1"),
     Redis:get("k1").
 
 e.g. 4 (use in OTP with connection pool)
     % in main supervisor:
-    {redis_client_sup, {redis_conn_sup, start_link, []},
+    {redis_conn_sup, {redis_conn_sup, start_link, []},
         permanent, 1000, supervisor, [redis_client]}
 
     % start client pool
     [begin
-        Name = redis_client:name(Host, Port, I)
-        {ok, _} = redis_cilent_sup:connect(Host, Port, Pass, Name)
+        Name = redis_client:name(Host, Port, I),
+        {ok, _} = redis_conn_sup:connect(Host, Port, Pass, Name)
     end || I <- lists:seq(1, 5)],
 
     % random select a client
     Selected = redis_client:existing_name(Host, Port, random:uniform(5)),
     Redis = redis_client:handler(Selected),
+    Redis:set("k1", "v1"),
+    Redis:get("k1").
+
+e.g.5 (use in OTP by the auxiliary functions)
+    % in main supervisor:
+    [redis_conn_sup:sup_spec()]
+
+    % start the client pool in the main supervisor init functions
+    {ok, Pid} = superviosr:start_link ....
+    redis_conn_sup:sup_start_client(Host, Port, Pass, Pool),
+    {ok, Pid}.
+
+    % in the code, random select one client
+    Redis = redis_conn_sup:sup_rand_client(Host, Port, Pass, Pool),
+    % or
+    % Redis = redis_conn_sup:sup_rand_client(),
     Redis:set("k1", "v1"),
     Redis:get("k1").
 

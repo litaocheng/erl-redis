@@ -1,2 +1,2 @@
 APP_NAME=redis
-APP_VSN=1.0.0
+APP_VSN=1.0.1
