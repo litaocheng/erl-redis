@@ -138,6 +138,8 @@ delete(Key) ->
 %% O(1)
 -spec multi_delete(Keys :: [key()]) -> 
     non_neg_integer().
+multi_delete([]) ->
+    0;
 multi_delete(Keys) ->
     call(mbulk_list([<<"DEL">> | Keys])).
 
