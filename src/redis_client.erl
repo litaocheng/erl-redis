@@ -19,7 +19,7 @@
 
 -export([get_server/1, get_sock/1]).
 -export([set_selected_db/2, get_selected_db/1]).
--export([send/2]).
+-export([command/2, command/3]).
 -export([subscribe/4, unsubscribe/2, unsubscribe/3]).
 -export([quit/1, shutdown/1]).
 
@@ -31,7 +31,7 @@
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
                             terminate/2, code_change/3]).
 
--compile({inline, [send/2]}).
+-compile({inline, [command/2]}).
                 
 -record(pubsub, {
         cb_sub,
@@ -112,10 +112,16 @@ set_selected_db(Client, Index) ->
 get_selected_db(Client) ->
     gen_server:call(Client, {get, dbindex}).
 
-%% @doc send the data
--spec send(Client :: pid(), Data :: iolist()) -> any().
-send(Client, Data) ->
-    gen_server:call(Client, {command, Data}).
+%% @doc send the command to redis server
+-spec command(Client :: pid(), Data :: iolist()) -> any().
+command(Client, Data) ->
+    gen_server:call(Client, {command, Data, ?COMMAND_TIMEOUT}).
+
+%% @doc send the command to redis server
+-spec command(pid(), iolist(), timeout()) -> any().
+command(Client, Data, Timeout) ->
+    gen_server:call(Client, {command, Data, Timeout}, Timeout).
+
 
 %% NOTE: the subscribe and unsubscribe functions are asynchronous,
 %% it will return 'ok' immediately. you must do the working in 
@@ -201,17 +207,16 @@ init({Server = {Host, Port}, Passwd}) ->
             {stop, Reason}
     end.
 
-handle_call({command, Data}, _From, 
+handle_call({command, Data, Timeout}, _From, 
         State = #state{sock = Sock, server = _Server, ctx = normal}) ->
     ?DEBUG2("redis client send data:~n~p~n\t=> ~p", [Data, _Server]),
     %?DEBUG2(">>>inet options ~p>>>>", [inet:getopts(Sock, [packet, active])]),
-    Reply = (catch do_send_recv(Data, Sock)),
-    %ok = inet:setopts(Sock, [{active, once}]),
+    Reply = (catch do_send_recv(Data, Sock, Timeout)),
     %?DEBUG2("message queue len:~p", [process_info(self(), message_queue_len)]),
     %?DEBUG2("<<<inet options ~p<<<<", [inet:getopts(Sock, [packet, active])]),
     ?DEBUG2("reply is: ~p", [Reply]),
     {reply, Reply, State};
-handle_call({command, _Data}, _From, State) ->
+handle_call({command, _Data, _Timeout}, _From, State) ->
     {reply, {error, in_pubsub_mode}, State};
 
 handle_call({subscribe, Data, CbSub, CbMsg}, _From, 
@@ -291,7 +296,11 @@ to_atom(String, false) ->
 %% do sync send and recv 
 do_send_recv(Data, Sock) ->
     do_send(Sock, Data),
-    do_recv(Sock, null).
+    do_recv(Sock, null, ?COMMAND_TIMEOUT).
+
+do_send_recv(Data, Sock, Timeout) ->
+    do_send(Sock, Data),
+    do_recv(Sock, null, Timeout).
 
 do_send(Sock, Data) ->
     case gen_tcp:send(Sock, Data) of
@@ -302,11 +311,11 @@ do_send(Sock, Data) ->
             exit({error, Reason})
     end.
 
-do_recv(Sock, PState) ->
+do_recv(Sock, PState, Timeout) ->
     receive 
         {tcp, Sock, Packet} ->
             %?DEBUG2("receive packet :~p", [Packet]),
-            do_handle_packet(Sock, Packet, PState);
+            do_handle_packet(Sock, Packet, PState, Timeout);
         {tcp_closed, _Socket} ->
             ?ERROR2("socket closed by remote peer", []),
             throw(tcp_closed);
@@ -314,7 +323,7 @@ do_recv(Sock, PState) ->
             ?ERROR2("recv message error:~p", [Reason]),
             exit({tcp_error, Reason})
     after 
-        ?RECV_TIMEOUT ->
+        Timeout ->
             ?ERROR2("recv message timeout", []),
             throw({recv, timeout})
     end.
@@ -322,7 +331,7 @@ do_recv(Sock, PState) ->
 
 do_pubsub(Sock, Packet, State = #state{pubsub = PubSub}) ->
     #pubsub{cb_sub = CbSub, cb_unsub = CbUnSub, cb_msg = CbMsg} = PubSub,
-    case do_handle_packet(Sock, Packet, null) of
+    case do_handle_packet(Sock, Packet, null, ?COMMAND_TIMEOUT) of
         [<<"subscribe">>, Channel, N] ->
             do_callback(CbSub, Channel, N),
             State;
@@ -343,14 +352,14 @@ do_callback(undefined, _Arg1, _Arg2) ->
 do_callback(Fun, Arg1, Arg2) when is_function(Fun, 2) ->
     catch Fun(Arg1, Arg2).
 
-do_handle_packet(Sock, Packet, PState) ->
+do_handle_packet(Sock, Packet, PState, Timeout) ->
     case redis_proto:parse_reply(Packet) of
         {mbulk_more, MB} when PState =:= null -> % multi bulk replies
             %?DEBUG2("need recv mbulk :~p", [MB]),
-            recv_bulks(Sock, MB);
+            recv_bulks(Sock, MB, Timeout);
         {bulk_more, N} -> % bulk reply
             %?DEBUG2("need recv bulk data len:~p", [N]),
-            recv_bulk_data(Sock, N);
+            recv_bulk_data(Sock, N, Timeout);
         Val -> % integer, status or error
             %?DEBUG2("parse value is ~p", [Val]),
             inet:setopts(Sock, [{active, once}]),
@@ -358,25 +367,25 @@ do_handle_packet(Sock, Packet, PState) ->
     end.
 
 %% recv the bulk data 
-recv_bulk_data(Sock, N) ->
+recv_bulk_data(Sock, N, Timeout) ->
     ok = inet:setopts(Sock, [{packet, raw}]),
-    <<Val:N/bytes, "\r\n">> = recv_n(Sock, N+2), % include \r\n
+    <<Val:N/bytes, "\r\n">> = recv_n(Sock, N+2, Timeout), % include \r\n
     ok = inet:setopts(Sock, [{packet, line}, {active, once}]),
     Val.
 
 %% recv the multiple bulk replies
-recv_bulks(Sock, M) ->
+recv_bulks(Sock, M, Timeout) ->
     ok = inet:setopts(Sock, [{active, once}]),
-    recv_bulks1(Sock, M, []).
+    recv_bulks1(Sock, M, [], Timeout).
 
-recv_bulks1(_Sock, 0, Acc) ->
+recv_bulks1(_Sock, 0, Acc, _Timeout) ->
     lists:reverse(Acc);
-recv_bulks1(Sock, N, Acc) ->
-    Bulk = do_recv(Sock, mbulk),
-    recv_bulks1(Sock, N-1, [Bulk | Acc]).
+recv_bulks1(Sock, N, Acc, Timeout) ->
+    Bulk = do_recv(Sock, mbulk, Timeout),
+    recv_bulks1(Sock, N-1, [Bulk | Acc], Timeout).
 
-recv_n(Sock, N) ->
-    case gen_tcp:recv(Sock, N, ?RECV_TIMEOUT) of
+recv_n(Sock, N, Timeout) ->
+    case gen_tcp:recv(Sock, N, Timeout) of
         {ok, Data} ->
             Data;
         {error, timeout} ->

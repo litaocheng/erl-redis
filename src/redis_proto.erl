@@ -22,26 +22,26 @@
         [mbulk/1, mbulk/2, mbulk/3, mbulk/4, mbulk_list/1, parse_reply/1]}).  
 
 %% @doc generate the mbulk command
--spec mbulk(iodata()) -> iolist().
+-spec mbulk(iolist()) -> iolist().
 mbulk(Type) ->
     [<<"*1">>, ?CRLF, mbulk0(Type)].
 
--spec mbulk(iodata(), iodata()) ->
+-spec mbulk(iolist(), iolist()) ->
     iolist().
 mbulk(Type, Arg) ->
     [<<"*2">>, ?CRLF, mbulk0(Type), mbulk0(Arg)].
 
--spec mbulk(iodata(), iodata(), iodata()) -> 
+-spec mbulk(iolist(), iolist(), iolist()) -> 
     iolist().
 mbulk(Type, Arg1, Arg2) ->
     [<<"*3">>, ?CRLF, mbulk0(Type), mbulk0(Arg1), mbulk0(Arg2)].
 
--spec mbulk(iodata(), iodata(), iodata(), iodata()) -> 
+-spec mbulk(iolist(), iolist(), iolist(), iolist()) -> 
     iolist().
 mbulk(Type, Arg1, Arg2, Arg3) ->
     [<<"*4">>, ?CRLF, mbulk0(Type), mbulk0(Arg1), mbulk0(Arg2), mbulk0(Arg3)].
 
--spec mbulk_list(L :: [iodata()]) ->
+-spec mbulk_list(L :: [iolist()]) ->
     iolist().
 mbulk_list(L) ->
     N = length(L),

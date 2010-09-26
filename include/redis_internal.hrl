@@ -51,7 +51,7 @@
 %% the redis supervisor name
 -define(CONN_SUP, redis_conn_sup).
 -define(CONN_TIMEOUT, 5000).
--define(RECV_TIMEOUT, 2000).  
+-define(COMMAND_TIMEOUT, 2000).  
 -define(CONN_POOL_DEF, 5).
 -define(CONN_POOL_MIN, 1).
 -define(CONN_POOL_MAX, 64).
@@ -74,7 +74,7 @@
 -type second() :: non_neg_integer().
 -type timestamp() :: non_neg_integer().
 -type value_type() :: 'none' | 'string' | 'list' | 'set' | 'hash'.
--type status_code() :: atom().
+-type status_code() :: atom() | binary().
 -type error() :: {'error', any()}.
 -type score() :: integer() | float() | [byte()].
 -type count() :: non_neg_integer().
@@ -86,5 +86,6 @@
 -type inet_server() :: {inet_host(), inet_port()}.
 
 -type trans_handler() :: atom().
+
 
 -endif. % REDIS_INTERNAL_HRL

@@ -15,15 +15,19 @@
 
 -export([i/0, version/0, db/0]).
 
+%% connection handling
+-export([auth/1, ping/0]).
+
 %% generic commands
--export([ping/0, exists/1, delete/1, multi_delete/1, type/1, keys/1,
+-export([exists/1, delete/1, multi_delete/1, type/1, keys/1,
         random_key/0, rename/2, rename_not_exists/2, dbsize/0, 
-        expire/2, expire_at/2, ttl/1, select/1, move/2, 
+        expire/2, expire_at/2, persist/1, ttl/1, select/1, move/2, 
         flush_db/0, flush_all/0]).
 
 %% string commands
--export([set/2, set/3, get/1, getset/2, multi_get/1, not_exists_set/2, multi_set/1,
-        multi_set_not_exists/1, incr/1, incr/2, decr/1, decr/2,
+-export([set/2, set/3, get/1, getset/2, multi_get/1, 
+        set_not_exists/2, multi_set/1, multi_set_not_exists/1, 
+        incr/1, incr/2, decr/1, decr/2,
         append/2, substr/3]).
 
 %% list commands
@@ -90,8 +94,6 @@
             {error, BadServers}
     end).
 
--define(CALL, redis_client:send(PClient)).
-
 %% @doc show stats info in the stdout
 -spec i() -> 'ok'.
 i() ->
@@ -108,13 +110,22 @@ db() ->
     redis_manager:get_selected_db(PClient).
 
 %%------------------------------------------------------------------------------
-%% generic commands
+%% connection handling
 %%------------------------------------------------------------------------------
 
+%% @doc simple password authentication
+-spec auth(iolist()) -> 'ok' | error().
+auth(Pass) ->
+    call(mbulk(<<"AUTH">>, Pass)).
+
 %% @doc ping the redis server
--spec ping() -> 'ok' | {'error', [atom()]}.
+-spec ping() -> 'ok' | error().
 ping() ->
     call(mbulk(<<"PING">>)).
+
+%%------------------------------------------------------------------------------
+%% generic commands
+%%------------------------------------------------------------------------------
 
 %% @doc test if the specified key exists
 %% O(1)
@@ -172,7 +183,7 @@ random_key() ->
 %% @doc atmoically renames key OldKey to NewKey
 %% O(1)
 -spec rename(OldKey :: key(), NewKey :: key()) -> 
-    'ok'.
+    'ok' | error().
 rename(OldKey, NewKey) ->
     call(mbulk(<<"RENAME">>, OldKey, NewKey)).
 
@@ -186,8 +197,7 @@ rename_not_exists(OldKey, NewKey) ->
 
 %% @doc return the nubmer of keys in all the currently selected database
 %% O(1)
--spec dbsize() -> 
-    integer().
+-spec dbsize() -> count().
 dbsize() ->
     call(mbulk(<<"DBSIZE">>)).
 
@@ -209,16 +219,23 @@ expire_at(Key, TimeStamp) ->
     R = call(mbulk(<<"EXPIREAT">>, Key, ?N2S(TimeStamp))),
     int_may_bool(R).
 
+%% @doc undo the expire on the key. since redis v2.1.3
+%% O(1)
+-spec persist(key()) -> boolean().
+persist(Key) ->
+    R = call(mbulk("PERSIST", Key)),
+    int_may_bool(R).
+
 %% @doc return the remaining time to live in seconds of a key that
 %% has an EXPIRE set
 %% O(1)
--spec ttl(Key :: key()) -> non_neg_integer().
+-spec ttl(Key :: key()) -> count().
 ttl(Key) ->
     call(mbulk(<<"TTL">>, Key)).
 
 %% @doc select the DB with have the specified zero-based numeric index
 -spec select(Index :: index()) ->
-    'ok'.
+    'ok' | error().
 select(Index) ->
     R = call(mbulk(<<"SELECT">>, ?N2S(Index))),
     case R of
@@ -236,11 +253,12 @@ move(Key, DBIndex) ->
     R = call(mbulk(<<"MOVE">>, Key, ?N2S(DBIndex))),
     int_may_bool(R).
 
-%% @doc delete all the keys of the currently selected DB
+%% @doc _delete_ all the keys of the currently selected DB
 -spec flush_db() -> 'ok'.
 flush_db() ->
     call(mbulk(<<"FLUSHDB">>)).
             
+%% @doc _delete_ all the keys of existing databases in redis server
 -spec flush_all() -> 'ok'.
 flush_all() ->
     call(mbulk(<<"FLUSHALL">>)).
@@ -252,43 +270,40 @@ flush_all() ->
 %% @doc set the string as value of the key
 %% O(1)
 -spec set(Key :: key(), Val :: str()) ->
-    'ok'.
+    'ok' | status_code().
 set(Key, Val) ->
     call(mbulk(<<"SET">>, Key, Val)).
 
 %% @doc set the string as value of the key with expired time
 %% O(1)
 -spec set(key(), str(), second()) ->
-    'ok'.
+    'ok' | status_code().
 set(Key, Val, Expire) ->
     call(mbulk(<<"SETEX">>, Key, ?N2S(Expire), Val)).
     
 %% @doc get the value of specified key
 %% O(1)
--spec get(Key :: key()) ->
-    null() | binary().
+-spec get(Key :: key()) -> value().
 get(Key) ->
     call(mbulk(<<"GET">>, Key)).
 
 %% @doc atomatic set the value and return the old value
 %% O(1)
--spec getset(Key :: key(), Val :: str()) ->
-    null() | binary(). 
+-spec getset(Key :: key(), Val :: str()) -> value().
 getset(Key, Val) ->
     call(mbulk(<<"GETSET">>, Key, Val)).
 
 %% @doc get the values of all the specified keys
 %% O(1)
--spec multi_get(Keys :: [key()]) ->
-    [string() | null()].
+-spec multi_get(Keys :: [key()]) -> [value()].
 multi_get(Keys) ->
     call(mbulk_list([<<"MGET">> | Keys])).
 
 %% @doc set value, if the key already exists no operation is performed
 %% O(1)
--spec not_exists_set(Key :: key(), Val :: string()) -> 
+-spec set_not_exists(Key :: key(), Val :: string()) -> 
     boolean().
-not_exists_set(Key, Val) ->
+set_not_exists(Key, Val) ->
     R = call(mbulk(<<"SETNX">>, Key, Val)),
     int_may_bool(R).
 
@@ -302,6 +317,7 @@ multi_set(KeyVals) ->
 
 %% @doc set the respective keys to respective values, either all the
 %% key-value paires or not none at all are set.
+%% if all the keys were set return true, otherwise return false.
 %% O(1)
 -spec multi_set_not_exists(KeyVals :: [{key(), str()}]) ->
     boolean().
@@ -312,8 +328,7 @@ multi_set_not_exists(KeyVals) ->
 
 %% @doc increase the integer value of key
 %% O(1)
--spec incr(Key :: key()) -> 
-    integer().
+-spec incr(Key :: key()) -> integer().
 incr(Key) ->
     call(mbulk(<<"INCR">>, Key)).
 
@@ -343,13 +358,12 @@ decr(Key, N) ->
 %% O(1)
 -spec append(key(), value()) -> 
     integer().
-append(Key, Str) ->
-    call(mbulk(<<"APPEND">>, Key, Str)).
+append(Key, Val) ->
+    call(mbulk(<<"APPEND">>, Key, Val)).
 
 %% @doc return a substring of a larger string, both Start and End are inclusive
 %% O(1)
--spec substr(key(), integer(), integer()) -> 
-    integer().
+-spec substr(key(), integer(), integer()) -> value().
 substr(Key, Start, End) when is_integer(Start), is_integer(End) ->
     call(mbulk(<<"SUBSTR">>, Key, ?N2S(Start), ?N2S(End))).
 
@@ -362,25 +376,26 @@ substr(Key, Start, End) when is_integer(Start), is_integer(End) ->
 %% returnt he current list length
 %% O(1)
 -spec list_push_tail(Key :: key(), Val :: str()) ->
-    integer().
+    count() | error().
 list_push_tail(Key, Val) ->
     call(mbulk(<<"RPUSH">>, Key, Val)).
 
 %% @doc add the string Val to the head of the list stored at Key
 %% O(1)
 -spec list_push_head(Key :: key(), Val :: str()) ->
-    'ok' | error().
+    count() | error().
 list_push_head(Key, Val) ->
     call(mbulk(<<"LPUSH">>, Key, Val)).
 
 %% @doc return the length of the list
 %% O(1)
 -spec list_len(Key :: key()) ->
-    length() | error().
+    count() | error().
 list_len(Key) ->
     call(mbulk(<<"LLEN">>, Key)).
 
 %% @doc return the specified elements of the list, Start, End are zero-based
+%% Start End can also be nagative numbers indicating offsets from the end of list
 %% O(n)
 -spec list_range(Key :: key(), Start :: index(), End :: index()) ->
     [value()].
@@ -412,7 +427,7 @@ list_set(Key, Idx, Val) ->
 %% @doc remove all the elements in the list whose value are Val
 %% O(n)
 -spec list_rm(Key :: key(), Val :: str()) ->
-    integer().
+    integer() | error().
 list_rm(Key, Val) ->
     call(mbulk(<<"LREM">>, Key, "0", Val)).
 
@@ -420,29 +435,29 @@ list_rm(Key, Val) ->
 %% tail in the list
 %% O(n)
 -spec list_rm_from_head(Key :: key(), N :: pos_integer(), Val :: str()) ->
-    integer().
-list_rm_from_head(Key, N, Val) ->
+    integer() | error().
+list_rm_from_head(Key, N, Val) when is_integer(N), N > 0 ->
     call(mbulk(<<"LREM">>, Key, ?N2S(N), Val)).
 
 %% @doc remove the first N occurrences of the value from tail to
 %% head in the list
 %% O(n)
 -spec list_rm_from_tail(Key :: key(), N :: pos_integer(), Val :: str()) ->
-    integer().
-list_rm_from_tail(Key, N, Val) ->
+    integer() | error().
+list_rm_from_tail(Key, N, Val) when is_integer(N), N > 0 ->
     call(mbulk(<<"LREM">>, Key, ?N2S(-N), Val)).
 
 %% @doc atomically return and remove the first element of the list
 %% O(1)
 -spec list_pop_head(Key :: key()) ->
-    value().
+    value() | error().
 list_pop_head(Key) ->
     call(mbulk(<<"LPOP">>, Key)).
 
 %% @doc atomically return and remove the last element of the list
 %% O(1)
 -spec list_pop_tail(Key :: key()) ->
-    value().
+    value() | error().
 list_pop_tail(Key) ->
     call(mbulk(<<"RPOP">>, Key)).
 
@@ -450,17 +465,17 @@ list_pop_tail(Key) ->
 %% the element into the DstKey list
 %% O(1)
 -spec list_tail_to_head(SrcKey :: key(), DstKey :: key()) ->
-    'ok'.
+    'ok' | error().
 list_tail_to_head(SrcKey, DstKey) ->
     call(mbulk(<<"RPOPLPUSH">>, SrcKey, DstKey)).
 
-%% @doc blocking list_pop_head
+%% @doc blocking list_pop_head, timeout unit is millisecond
 %% O(1)
 -spec list_block_pop_head([key()], timeout()) ->
-    value().
+    value() | error().
 list_block_pop_head(Keys, Timeout) ->
     TimeStr = ?N2S(timeout_val(Timeout)),
-    call(mbulk([<<"BLPOP">> | (Keys ++ [TimeStr])])).
+    call(mbulk([<<"BLPOP">> | (Keys ++ [TimeStr])]), Timeout).
 
 %% @doc blocking list_pop_tail
 %% O(1)
@@ -468,7 +483,7 @@ list_block_pop_head(Keys, Timeout) ->
     value().
 list_block_pop_tail(Keys, Timeout) ->
     TimeStr = ?N2S(timeout_val(Timeout)),
-    call(mbulk([<<"BRPOP">> | (Keys ++ [TimeStr])])).
+    call(mbulk([<<"BRPOP">> | (Keys ++ [TimeStr])]), Timeout).
 
 %%------------------------------------------------------------------------------
 %% set commands (in set all members is distinct)
@@ -477,14 +492,14 @@ list_block_pop_tail(Keys, Timeout) ->
 %% @doc add Mem to the set stored at Key
 %% O(1)
 -spec set_add(Key :: key(), Mem :: str()) ->
-    boolean().
+    boolean() | error().
 set_add(Key, Mem) ->
     R = call(mbulk(<<"SADD">>, Key, Mem)),
     int_may_bool(R).
 
 %% @doc remove the specified member from the set
 -spec set_rm(Key :: key(), Mem :: str()) ->
-    boolean().
+    boolean() | error().
 set_rm(Key, Mem) ->
     R = call(mbulk(<<"SREM">>, Key, Mem)),
     int_may_bool(R).
@@ -492,14 +507,14 @@ set_rm(Key, Mem) ->
 %% @doc remove a random member from the set, returning it as return value
 %% O(1)
 -spec set_pop(Key :: key()) ->
-    value().
+    value() | error().
 set_pop(Key) ->
     call(mbulk(<<"SPOP">>, Key)).
 
 %% @doc atomically move the member form one set to another
 %% O(1)
 -spec set_move(Src :: key(), Dst :: key(), Mem :: str()) ->
-    boolean().
+    boolean() | error().
 set_move(Src, Dst, Mem) ->
     R = call(mbulk(<<"SMOVE">>, Src, Dst, Mem)),
     int_may_bool(R).
@@ -507,14 +522,14 @@ set_move(Src, Dst, Mem) ->
 %% @doc return the number of elements in set
 %% O(1)
 -spec set_len(Key :: key()) ->
-    integer().
+    integer() | error().
 set_len(Key) ->
     call(mbulk(<<"SCARD">>, Key)).
 
 %% @doc test if the specified value is the member of the set
 %% O(1)
 -spec set_is_member(Key :: key(), Mem :: str()) ->
-    boolean().
+    boolean() | error().
 set_is_member(Key, Mem) ->
     R = call(mbulk(<<"SISMEMBER">>, Key, Mem)),
     int_may_bool(R).
@@ -522,7 +537,7 @@ set_is_member(Key, Mem) ->
 %% @doc return the intersection between the sets
 %% O(N*M)
 -spec set_inter(Keys :: [key()]) ->
-    [value()].
+    [value()] | error().
 set_inter(Keys) ->
     call(mbulk_list([<<"SINTER">> | Keys])).
 
@@ -536,7 +551,7 @@ set_inter_store(Dst, Keys) ->
 %% @doc  return the union of all the sets
 %% O(n)
 -spec set_union(Keys :: [key()]) ->
-    [value()].
+    [value()] | error().
 set_union(Keys) ->
     call(mbulk_list([<<"SUNION">> | Keys])).
 
@@ -551,7 +566,7 @@ set_union_store(Dst, Keys) ->
 %% @doc return the difference between the First set and all the other sets
 %% o(n)
 -spec set_diff(First :: key(), Keys :: [key()]) ->
-    [value()].
+    [value()] | error().
 set_diff(First, Keys) ->
     call(mbulk_list([<<"SDIFF">>, First | Keys])).
 
@@ -566,14 +581,14 @@ set_diff_store(Dst, First, Keys) ->
 %% @doc return all the members in the set
 %% O(1)
 -spec set_members(Key :: key()) ->
-    [value()].
+    [value()] | error().
 set_members(Key) ->
     call(mbulk(<<"SMEMBERS">>, Key)).
 
 %% @doc return a random member from the set
 %% O(1)
 -spec set_random_member(Key :: key()) ->
-    value().
+    value() | error().
 set_random_member(Key) ->
     call(mbulk(<<"SRANDMEMBER">>, Key)).
 
@@ -891,7 +906,7 @@ sort(Key, SortOpt) ->
 %%------------------------------------------------------------------------------
 
 %% @doc transaction begin
--spec trans_begin() -> 'ok' | {'error', any()}.
+-spec trans_begin() -> 'ok' | error().
 trans_begin() ->
     call(mbulk(<<"MULTI">>)).
 
@@ -951,7 +966,7 @@ lastsave_time() ->
     call(mbulk(<<"LASTSAVE">>)).
 
 %% @doc synchronously save the DB on disk, then shutdown the server
--spec shutdown() -> 'ok' | {'error', any()}.
+-spec shutdown() -> 'ok' | error().
 shutdown() ->
     redis_client:shutdown(PClient).
 
@@ -1034,7 +1049,10 @@ do_zset_store(Cmd, Dst, Keys, Weights, Aggregate) when
         )).
 
 call(Cmd) ->
-    redis_client:send(PClient, Cmd).
+    redis_client:command(PClient, Cmd).
+
+call(Cmd, Timeout) ->
+    redis_client:command(PClient, Cmd, Timeout).
 
 %% convert score to string
 score_to_string(S) when is_integer(S) ->
@@ -1056,7 +1074,7 @@ string_to_score(S) when is_list(S) ->
 %% the timeout value
 timeout_val(infinity) ->
     0;
-timeout_val(T) when is_integer(T) ->
+timeout_val(T) when is_integer(T), T >= 0 ->
     T.
 
 %% convert to boolean if the value is possible, otherwise return the value self

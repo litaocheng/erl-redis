@@ -18,10 +18,10 @@ test_compile:
 	(mkdir -p ./ebin)
 	(cd src;$(MAKE) TEST=true NOLOG=true)
 
-test: clean eunit comm_test 
+test: clean unit_test comm_test 
 	@#(make clean)
 
-eunit: test_compile 
+unit_test: test_compile 
 	(erl -noinput -pa ./ebin -eval "eunit:test(\"./ebin\", []), init:stop()")
 
 comm_test: test_compile 
