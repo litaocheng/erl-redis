@@ -243,7 +243,7 @@ test_hash(Config) ->
     int(?PF(Redis:hash_len("myhash"))),
 
     % hash keys/vals/all
-    Redis:hash_set(<<"myhash">>, "f2", <<"v2">>),
+    true = Redis:hash_set(<<"myhash">>, "f2", <<"v2">>),
     [<<"f1">>, <<"f2">>] = ?PF(Redis:hash_keys("myhash")),
     [<<"v1">>, <<"v2">>] = ?PF(Redis:hash_vals("myhash")),
     [{<<"f1">>, <<"v1">>}, {<<"f2">>, <<"v2">>}] = ?PF(Redis:hash_all("myhash")),
@@ -308,16 +308,27 @@ test_sort(Config) ->
 test_trans(Config) ->
     Redis = ?config(redis_client, Config),
     ok = ?PF(Redis:trans_begin()),
-    ?PF(Redis:get("k1")),
-    ?PF(Redis:hash_get("myhash", "f2")),
-    ?PF(Redis:hash_set("myhash", "f2", "v22")),
-    ?PF(Redis:trans_commit()),
+    queued = Redis:hash_get("myhash", "f2"),
+    queued = Redis:hash_set("myhash", "f2", "v22"),
+    [<<"v2">>, 0] = ?PF(Redis:trans_commit()),
 
+    ok = Redis:set("k1", "v1"),
     ok = ?PF(Redis:trans_begin()),
     ?PF(Redis:get("k1")),
-    ?PF(Redis:hash_get("myhash", "f2")),
-    ?PF(Redis:hash_set("myhash", "f2", "v22")),
+    queued = Redis:set("k1", "v11"),
+    queued = Redis:hash_get("myhash", "f2"),
+    queued = Redis:hash_set("myhash", "f2", "v22"),
     ok = ?PF(Redis:trans_abort()),
+    <<"v1">> = Redis:get("k1"),
+
+    % include watch
+    ok = Redis:watch(["kw1", "kw2"]),
+    Redis:trans_begin(),
+    Redis:trans_commit(),
+
+    ok = Redis:unwatch(),
+    Redis:trans_begin(),
+    Redis:trans_abort(),
     ok.
 
 test_persistence(Config) -> 

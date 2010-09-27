@@ -50,7 +50,6 @@
         zset_union_store/2, zset_union_store/4,
         zset_inter_store/2, zset_inter_store/4]).
 
-
 %% hash commands
 -export([hash_set/3, hash_set_not_exists/3, hash_multi_set/2,
         hash_get/2, hash_multi_get/2, 
@@ -61,7 +60,8 @@
 -export([sort/2]).
 
 %% transaction commands
--export([trans_begin/0, trans_commit/0, trans_abort/0]).
+-export([watch/1, unwatch/0,
+        trans_begin/0, trans_commit/0, trans_abort/0]).
 
 %% pubsub commands
 -export([subscribe/3, unsubscribe/1, unsubscribe/2, publish/2]).
@@ -744,6 +744,8 @@ zset_inter_store(Dst, Keys, Weights, Aggregate) ->
 %%------------------------------------------------------------------------------
 
 %% @doc set specified hash filed with Val
+%% return true if the new field is created, otherwise just update the value with
+%% the specified field and return false
 %% O(1)
 -spec hash_set(Key :: key(), field(), Val :: str()) ->
     boolean().
@@ -904,6 +906,17 @@ sort(Key, SortOpt) ->
 %%------------------------------------------------------------------------------
 %% transaction commands 
 %%------------------------------------------------------------------------------
+
+%% @doc watch some keys, before the EXEC command in transaction, if the watched keys
+%% were changed, the transaction failed, otherwise the transaction success
+-spec watch([key()]) -> 'ok'.
+watch(Keys) ->
+    call(mbulk_list([<<"WATCH">> | Keys])).
+
+%% @doc flush all the watched keys
+-spec unwatch() -> 'ok'.
+unwatch() ->
+    call(mbulk(<<"UNWATCH">>)).
 
 %% @doc transaction begin
 -spec trans_begin() -> 'ok' | error().
