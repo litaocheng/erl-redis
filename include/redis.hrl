@@ -12,12 +12,12 @@
 %% sort options argument
 %% more explanation see redis wiki
 -record(redis_sort, {
-    by_pat = "" :: string(),
-    get_pat = [] :: [string()],    % get pattern list
-    limit = null,                  % the limit info {Start, Count}
+    by_pat = <<>> :: str(),
+    get_pat = [] :: [str()],    % get pattern list
+    limit = null,               % the limit info {Start, Count}
     asc = true, 
     alpha = false,
-    store = "" :: iolist() 
+    store = <<>> :: str() 
     }).
 
 -type redis_sort() :: #redis_sort{}.

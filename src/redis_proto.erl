@@ -87,6 +87,8 @@ tokens(S, Sep) when is_integer(Sep) ->
 %%------------------------------------------------------------------------------
 
 %% generte mbulk command line
+mbulk0(N) when is_integer(N) ->
+    mbulk0(?N2S(N));
 mbulk0(B) when is_binary(B) ->
     N = byte_size(B),
     ["$", ?N2S(N), ?CRLF, B, ?CRLF];

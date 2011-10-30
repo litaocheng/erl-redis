@@ -62,21 +62,25 @@
 
 %% type defines
 -type key() :: binary() | [byte()].
--type field() :: key().
 -type str() :: binary() | [byte()].
+-type val() :: null() | str().
 -type null() :: 'null'.
--type value() :: null() | str().
+-type command() :: binary().
+-type uint() :: non_neg_integer().
+-type int() :: integer().
 
 -type length() :: non_neg_integer().
--type index() :: integer().
 -type pattern() :: binary() | [byte()].
 -type passwd() :: [byte()] | binary().
 -type second() :: non_neg_integer().
 -type timestamp() :: non_neg_integer().
--type value_type() :: 'none' | 'string' | 'list' | 'set' | 'hash'.
 -type status_code() :: atom() | binary().
 -type error() :: {'error', any()}.
--type score() :: integer() | float() | [byte()].
+-type value() :: null() | str() | status_code() | list() | error().
+-type value_type() :: 'none' | 'string' | 'list' | 'set' | 'zset' | 'hash'.
+-type score() :: '-inf' | '+inf' | integer() | float() |
+{open, integer() | float()} | {closed, integer() | float()}.
+-type aggregate() :: 'sum' | 'min' | 'max'.
 -type count() :: non_neg_integer().
 -type channel() :: str().
 -type client() :: pid() | atom().

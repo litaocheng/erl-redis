@@ -3,12 +3,14 @@
 %%% @copyright erl-redis 2010
 %%%
 %%% @author litaocheng@gmail.com
-%%% @doc the interface for redis, this module is parameterized module:
-%%%     PClient - the context related client process
+%%% @doc the interface for redis, all the commands are same with redis.io/commands,
+%%%     except for all the function are lowercase of the redis commands
+%%%     (this module is parameterized module: Client - the context related client process)
+%%%     ref:http://redis.io/commands
 %%% @end
 %%%
 %%%----------------------------------------------------------------------
--module(redis, [PClient]).
+-module(redis, [Client]).
 -author('litaocheng@gmail.com').
 -vsn('0.1').
 -include("redis_internal.hrl").
@@ -18,46 +20,37 @@
 %% connection handling
 -export([auth/1, ping/0]).
 
-%% generic commands
--export([exists/1, delete/1, multi_delete/1, type/1, keys/1,
-        random_key/0, rename/2, rename_not_exists/2, dbsize/0, 
-        expire/2, expire_at/2, persist/1, ttl/1, select/1, move/2, 
-        flush_db/0, flush_all/0]).
+%% keys
+-export([del/1, exists/1, expire/2, expireat/2, keys/1, move/2,
+        object/2, persist/1, randomkey/0, rename/2, renamenx/2, 
+        sort/2, ttl/1, type/1, eval/4]).
 
-%% string commands
--export([set/2, set/3, get/1, getset/2, multi_get/1, 
-        set_not_exists/2, multi_set/1, multi_set_not_exists/1, 
-        incr/1, incr/2, decr/1, decr/2,
-        append/2, substr/3]).
+%% strings
+-export([append/2, decr/1, decrby/2, get/1, getbit/2, getrange/3, getset/2, 
+        incr/1, incrby/2, mget/1, mset/2, msetnx/2, set/2,
+        setbit/3, setex/3, setnx/2, setrange/3, strlen/1]).
 
-%% list commands
--export([list_push_tail/2, list_push_head/2, list_len/1, list_range/3, 
-        list_trim/3, list_index/2, list_set/3, 
-        list_rm/2, list_rm_from_head/3, list_rm_from_tail/3,
-        list_pop_head/1, list_pop_tail/1, list_tail_to_head/2,
-        list_block_pop_head/2, list_block_pop_tail/2]).
+%% hashes
+-export([hdel/2, hexists/2, hget/2, hgetall/1, hincrby/3,
+        hkeys/1, hlen/1, hmget/2, hmset/2, hset/3, hsetnx/3, hvals/1]).
 
-%% set commands
--export([set_add/2, set_rm/2, set_pop/1, set_move/3, set_len/1, set_is_member/2,
-        set_inter/1, set_inter_store/2, set_union/1, set_union_store/2,
-        set_diff/2, set_diff_store/3, set_members/1, set_random_member/1]).
+%% lists
+-export([blpop/2, brpop/2, drpoplpush/3, lindex/2, 
+        linsert/3, llen/1, lpop/1, lpush/2, lpushx/2,
+        lrange/3, lrem/3, lset/3, ltrim/3, rpop/1, rpoplpush/2,
+        rpush/2, rpushx/2]).
 
-%% sorted set commands
--export([zset_add/3, zset_rm/2, zset_incr/3, zset_index/2, zset_reverse_index/2,
-        zset_range_index/4, zset_range_index_reverse/4, 
-        zset_range_score/4, zset_range_score/6, zset_len/1, zset_score/2, 
-        zset_rm_by_index/3, zset_rm_by_score/3, 
-        zset_union_store/2, zset_union_store/4,
-        zset_inter_store/2, zset_inter_store/4]).
+%% sets
+-export([sadd/2, scard/1, sdiff/1, sdiffstore/2, sinter/1,
+        sinterstore/2, sismember/2, smemebers/1, smove/3,
+        spop/1, srandmember/1, srem/2, sunion/1, sunionstore/2]).
 
-%% hash commands
--export([hash_set/3, hash_set_not_exists/3, hash_multi_set/2,
-        hash_get/2, hash_multi_get/2, 
-        hash_incr/3, hash_del/2, hash_exists/2, hash_len/1, 
-        hash_keys/1, hash_vals/1, hash_all/1]).
-
-%% sort commands
--export([sort/2]).
+%% sorted sets
+-export([zdd/2, zcard/1, zcount/3, zincrby/3, 
+        zinterstore/2, zinterstore/3, zinterstore/4,
+        zrange/4, zrangebyscore/4, zrank/2, zrem/2,
+        zremrangebyrank/3, zremrangebyscore/3, zrevrange/4,
+        zrevrangebyscore/4, zrevrank/2, zscore/2, zunionstore/4]).
 
 %% transaction commands
 -export([watch/1, unwatch/0,
@@ -105,9 +98,9 @@ version() ->
     get_app_vsn().
 
 %% @doc return the currently selected db
--spec db() -> index().
+-spec db() -> uint().
 db() ->
-    redis_manager:get_selected_db(PClient).
+    redis_manager:get_selected_db(Client).
 
 %%------------------------------------------------------------------------------
 %% connection handling
@@ -123,83 +116,26 @@ auth(Pass) ->
 ping() ->
     call(mbulk(<<"PING">>)).
 
-%%------------------------------------------------------------------------------
-%% generic commands
-%%------------------------------------------------------------------------------
+%%-------
+%% keys
+%%-------
 
-%% @doc test if the specified key exists
+%% @doc delete keys
+%% return the number of keys that were removed
+-spec del(Keys :: [key()] | key()) -> 
+    integer().
+del([H|_] = Key) when is_list(H); is_binary(H) ->
+    call(mbulk_list([<<"DEL">> | Key]));
+del(Key) when is_binary(Key) ->
+    call(mbulk(<<"DEL">>, Key)).
+
+%% @doc test if the key exists
 %% O(1)
 -spec exists(Key :: key()) -> 
     boolean().
 exists(Key) ->
     R = call(mbulk(<<"EXISTS">>, Key)),
     int_may_bool(R).
-
-%% @doc remove the specified key, return ture if deleted, 
-%% otherwise return false
-%% O(1)
--spec delete(Keys :: [key()]) -> 
-    boolean().
-delete(Key) ->
-    R = call(mbulk(<<"DEL">>, Key)),
-    int_may_bool(R).
-
-%% @doc remove the specified keys, return the number of
-%% keys removed.
-%% O(1)
--spec multi_delete(Keys :: [key()]) -> 
-    non_neg_integer().
-multi_delete([]) ->
-    0;
-multi_delete(Keys) ->
-    call(mbulk_list([<<"DEL">> | Keys])).
-
-%% @doc return the type of the value stored at key
-%% O(1)
--spec type(Key :: key()) -> 
-    value_type().
-type(Key) ->
-    call(mbulk(<<"TYPE">>, Key)).
-
-%% @doc return the keys list matching a given pattern
-%% O(n)
--spec keys(Pattern :: pattern()) -> 
-    [key()].
-keys(Pattern) ->
-    case call(mbulk(<<"KEYS">>, Pattern)) of
-        null ->
-            [];
-        Keys ->
-            Keys
-    end.
-
-%% @doc return a randomly selected key from the currently selected DB
-%% O(1)
--spec random_key() -> 
-    key() | null().
-random_key() ->
-    call(mbulk(<<"RANDOMKEY">>)).
-
-%% @doc atmoically renames key OldKey to NewKey
-%% O(1)
--spec rename(OldKey :: key(), NewKey :: key()) -> 
-    'ok' | error().
-rename(OldKey, NewKey) ->
-    call(mbulk(<<"RENAME">>, OldKey, NewKey)).
-
-%% @doc  rename oldkey into newkey  but fails if the destination key newkey already exists. 
-%% O(1)
--spec rename_not_exists(OldKey :: key(), NewKey :: key()) -> 
-    boolean().
-rename_not_exists(OldKey, NewKey) ->
-    R = call(mbulk(<<"RENAMENX">>, OldKey, NewKey)),
-    int_may_bool(R).
-
-%% @doc return the nubmer of keys in all the currently selected database
-%% O(1)
--spec dbsize() -> count().
-dbsize() ->
-    call(mbulk(<<"DBSIZE">>)).
 
 %% @doc set a timeout on the specified key, after the Time the Key will
 %% automatically deleted by server.
@@ -219,625 +155,46 @@ expire_at(Key, TimeStamp) ->
     R = call(mbulk(<<"EXPIREAT">>, Key, ?N2S(TimeStamp))),
     int_may_bool(R).
 
-%% @doc undo the expire on the key. since redis v2.1.3
-%% O(1)
--spec persist(key()) -> boolean().
-persist(Key) ->
-    R = call(mbulk("PERSIST", Key)),
-    int_may_bool(R).
+%% @doc return the keys list matching a given pattern
+%% O(n)
+-spec keys(Pattern :: pattern()) -> 
+    [key()].
+keys(Pattern) ->
+    to_list(call(mbulk(<<"KEYS">>, Pattern))).
 
-%% @doc return the remaining time to live in seconds of a key that
-%% has an EXPIRE set
-%% O(1)
--spec ttl(Key :: key()) -> count().
-ttl(Key) ->
-    call(mbulk(<<"TTL">>, Key)).
-
-%% @doc select the DB with have the specified zero-based numeric index
--spec select(Index :: index()) ->
-    'ok' | error().
-select(Index) ->
-    R = call(mbulk(<<"SELECT">>, ?N2S(Index))),
-    case R of
-        ok ->
-            redis_client:set_selected_db(PClient, Index);
-        Other ->
-            Other
-    end.
-
-%% @doc move the specified key  from the currently selected DB to the specified
-%% destination DB
--spec move(Key :: key(), DBIndex :: index()) ->
+%% @doc move a key to anthor db
+-spec move(key(), uint()) ->
     boolean().
 move(Key, DBIndex) ->
-    R = call(mbulk(<<"MOVE">>, Key, ?N2S(DBIndex))),
-    int_may_bool(R).
-
-%% @doc _delete_ all the keys of the currently selected DB
--spec flush_db() -> 'ok'.
-flush_db() ->
-    call(mbulk(<<"FLUSHDB">>)).
-            
-%% @doc _delete_ all the keys of existing databases in redis server
--spec flush_all() -> 'ok'.
-flush_all() ->
-    call(mbulk(<<"FLUSHALL">>)).
-
-%%------------------------------------------------------------------------------
-%% string commands 
-%%------------------------------------------------------------------------------
-
-%% @doc set the string as value of the key
-%% O(1)
--spec set(Key :: key(), Val :: str()) ->
-    'ok' | status_code().
-set(Key, Val) ->
-    call(mbulk(<<"SET">>, Key, Val)).
-
-%% @doc set the string as value of the key with expired time
-%% O(1)
--spec set(key(), str(), second()) ->
-    'ok' | status_code().
-set(Key, Val, Expire) ->
-    call(mbulk(<<"SETEX">>, Key, ?N2S(Expire), Val)).
-    
-%% @doc get the value of specified key
-%% O(1)
--spec get(Key :: key()) -> value().
-get(Key) ->
-    call(mbulk(<<"GET">>, Key)).
-
-%% @doc atomatic set the value and return the old value
-%% O(1)
--spec getset(Key :: key(), Val :: str()) -> value().
-getset(Key, Val) ->
-    call(mbulk(<<"GETSET">>, Key, Val)).
-
-%% @doc get the values of all the specified keys
-%% O(1)
--spec multi_get(Keys :: [key()]) -> [value()].
-multi_get(Keys) ->
-    call(mbulk_list([<<"MGET">> | Keys])).
-
-%% @doc set value, if the key already exists no operation is performed
-%% O(1)
--spec set_not_exists(Key :: key(), Val :: string()) -> 
-    boolean().
-set_not_exists(Key, Val) ->
-    R = call(mbulk(<<"SETNX">>, Key, Val)),
-    int_may_bool(R).
-
-%% @doc set the respective keys to respective values
-%% O(1)
--spec multi_set(KeyVals :: [{key(), str()}]) ->
-    'ok'.
-multi_set(KeyVals) ->
-    L = [<<"MSET">> | lists:append([[K, V] || {K, V} <- KeyVals])],
-    call(mbulk_list(L)).
-
-%% @doc set the respective keys to respective values, either all the
-%% key-value paires or not none at all are set.
-%% if all the keys were set return true, otherwise return false.
-%% O(1)
--spec multi_set_not_exists(KeyVals :: [{key(), str()}]) ->
-    boolean().
-multi_set_not_exists(KeyVals) ->
-    L = [<<"MSETNX">> | lists:append([[K, V] || {K, V} <- KeyVals])],
-    R = call(mbulk_list(L)),
-    int_may_bool(R).
-
-%% @doc increase the integer value of key
-%% O(1)
--spec incr(Key :: key()) -> integer().
-incr(Key) ->
-    call(mbulk(<<"INCR">>, Key)).
-
-%% @doc increase the integer value of key by integer
-%% O(1)
--spec incr(Key :: key(), N :: integer()) -> 
-    integer().
-incr(Key, N) ->
-    call(mbulk(<<"INCRBY">>, Key, ?N2S(N))).
-
-%% @doc decrease the integer value of key
-%% O(1)
--spec decr(Key :: key()) -> 
-    integer().
-decr(Key) ->
-    call(mbulk(<<"DECR">>, Key)).
-
-%% @doc decrease the integer value of key by integer
-%% O(1)
--spec decr(Key :: key(), N :: integer()) -> 
-    integer().
-decr(Key, N) ->
-    call(mbulk(<<"DECRBY">>, Key, ?N2S(N))).
-
-%% @doc append the specified string to the string stored at key,
-%%      return the new string length
-%% O(1)
--spec append(key(), value()) -> 
-    integer().
-append(Key, Val) ->
-    call(mbulk(<<"APPEND">>, Key, Val)).
-
-%% @doc return a substring of a larger string, both Start and End are inclusive
-%% O(1)
--spec substr(key(), integer(), integer()) -> value().
-substr(Key, Start, End) when is_integer(Start), is_integer(End) ->
-    call(mbulk(<<"SUBSTR">>, Key, ?N2S(Start), ?N2S(End))).
-
-
-%%------------------------------------------------------------------------------
-%% list commands
-%%------------------------------------------------------------------------------
-
-%% @doc add the string Val to the tail of the list stored at Key
-%% returnt he current list length
-%% O(1)
--spec list_push_tail(Key :: key(), Val :: str()) ->
-    count() | error().
-list_push_tail(Key, Val) ->
-    call(mbulk(<<"RPUSH">>, Key, Val)).
-
-%% @doc add the string Val to the head of the list stored at Key
-%% O(1)
--spec list_push_head(Key :: key(), Val :: str()) ->
-    count() | error().
-list_push_head(Key, Val) ->
-    call(mbulk(<<"LPUSH">>, Key, Val)).
-
-%% @doc return the length of the list
-%% O(1)
--spec list_len(Key :: key()) ->
-    count() | error().
-list_len(Key) ->
-    call(mbulk(<<"LLEN">>, Key)).
-
-%% @doc return the specified elements of the list, Start, End are zero-based
-%% Start End can also be nagative numbers indicating offsets from the end of list
-%% O(n)
--spec list_range(Key :: key(), Start :: index(), End :: index()) ->
-    [value()].
-list_range(Key, Start, End) ->
-    call(mbulk(<<"LRANGE">>, Key, ?N2S(Start), ?N2S(End))).
-
-%% @doc trim an existing list, it will contains the elements specified by 
-%% Start End
-%% O(n)
--spec list_trim(Key :: key(), Start :: index(), End :: index()) ->
-    'ok' | error().
-list_trim(Key, Start, End) ->
-    call(mbulk(<<"LTRIM">>, Key, ?N2S(Start), ?N2S(End))).
-
-%% @doc return the element at Idx in the list(zero-based)
-%% O(n)
--spec list_index(Key :: key(), Idx :: index()) ->
-    value().
-list_index(Key, Idx) ->
-    call(mbulk(<<"LINDEX">>, Key, ?N2S(Idx))).
-
-%% @doc set the list element at Idx with the new value Val
-%% O(n)
--spec list_set(Key :: key(), Idx :: index(), Val :: str()) ->
-    'ok' | error().
-list_set(Key, Idx, Val) ->
-    call(mbulk(<<"LSET">>, Key, ?N2S(Idx), Val)).
-
-%% @doc remove all the elements in the list whose value are Val
-%% O(n)
--spec list_rm(Key :: key(), Val :: str()) ->
-    integer() | error().
-list_rm(Key, Val) ->
-    call(mbulk(<<"LREM">>, Key, "0", Val)).
-
-%% @doc remove the first N occurrences of the value from head to
-%% tail in the list
-%% O(n)
--spec list_rm_from_head(Key :: key(), N :: pos_integer(), Val :: str()) ->
-    integer() | error().
-list_rm_from_head(Key, N, Val) when is_integer(N), N > 0 ->
-    call(mbulk(<<"LREM">>, Key, ?N2S(N), Val)).
-
-%% @doc remove the first N occurrences of the value from tail to
-%% head in the list
-%% O(n)
--spec list_rm_from_tail(Key :: key(), N :: pos_integer(), Val :: str()) ->
-    integer() | error().
-list_rm_from_tail(Key, N, Val) when is_integer(N), N > 0 ->
-    call(mbulk(<<"LREM">>, Key, ?N2S(-N), Val)).
-
-%% @doc atomically return and remove the first element of the list
-%% O(1)
--spec list_pop_head(Key :: key()) ->
-    value() | error().
-list_pop_head(Key) ->
-    call(mbulk(<<"LPOP">>, Key)).
-
-%% @doc atomically return and remove the last element of the list
-%% O(1)
--spec list_pop_tail(Key :: key()) ->
-    value() | error().
-list_pop_tail(Key) ->
-    call(mbulk(<<"RPOP">>, Key)).
-
-%% @doc atomically remove the last element of the SrcKey list and push
-%% the element into the DstKey list
-%% O(1)
--spec list_tail_to_head(SrcKey :: key(), DstKey :: key()) ->
-    'ok' | error().
-list_tail_to_head(SrcKey, DstKey) ->
-    call(mbulk(<<"RPOPLPUSH">>, SrcKey, DstKey)).
-
-%% @doc blocking list_pop_head, timeout unit is millisecond
-%% O(1)
--spec list_block_pop_head([key()], timeout()) ->
-    value() | error().
-list_block_pop_head(Keys, Timeout) ->
-    TimeStr = ?N2S(timeout_val(Timeout)),
-    call(mbulk([<<"BLPOP">> | (Keys ++ [TimeStr])]), Timeout).
-
-%% @doc blocking list_pop_tail
-%% O(1)
--spec list_block_pop_tail([key()], timeout()) ->
-    value().
-list_block_pop_tail(Keys, Timeout) ->
-    TimeStr = ?N2S(timeout_val(Timeout)),
-    call(mbulk([<<"BRPOP">> | (Keys ++ [TimeStr])]), Timeout).
-
-%%------------------------------------------------------------------------------
-%% set commands (in set all members is distinct)
-%%------------------------------------------------------------------------------
-
-%% @doc add Mem to the set stored at Key
-%% O(1)
--spec set_add(Key :: key(), Mem :: str()) ->
-    boolean() | error().
-set_add(Key, Mem) ->
-    R = call(mbulk(<<"SADD">>, Key, Mem)),
-    int_may_bool(R).
-
-%% @doc remove the specified member from the set
--spec set_rm(Key :: key(), Mem :: str()) ->
-    boolean() | error().
-set_rm(Key, Mem) ->
-    R = call(mbulk(<<"SREM">>, Key, Mem)),
-    int_may_bool(R).
-
-%% @doc remove a random member from the set, returning it as return value
-%% O(1)
--spec set_pop(Key :: key()) ->
-    value() | error().
-set_pop(Key) ->
-    call(mbulk(<<"SPOP">>, Key)).
-
-%% @doc atomically move the member form one set to another
-%% O(1)
--spec set_move(Src :: key(), Dst :: key(), Mem :: str()) ->
-    boolean() | error().
-set_move(Src, Dst, Mem) ->
-    R = call(mbulk(<<"SMOVE">>, Src, Dst, Mem)),
-    int_may_bool(R).
-
-%% @doc return the number of elements in set
-%% O(1)
--spec set_len(Key :: key()) ->
-    integer() | error().
-set_len(Key) ->
-    call(mbulk(<<"SCARD">>, Key)).
-
-%% @doc test if the specified value is the member of the set
-%% O(1)
--spec set_is_member(Key :: key(), Mem :: str()) ->
-    boolean() | error().
-set_is_member(Key, Mem) ->
-    R = call(mbulk(<<"SISMEMBER">>, Key, Mem)),
-    int_may_bool(R).
-
-%% @doc return the intersection between the sets
-%% O(N*M)
--spec set_inter(Keys :: [key()]) ->
-    [value()] | error().
-set_inter(Keys) ->
-    call(mbulk_list([<<"SINTER">> | Keys])).
-
-%% @doc compute the intersection between the sets and save the 
-%% resulting to new set
--spec set_inter_store(Dst :: key(), Keys :: [key()]) ->
-    'ok' | error().
-set_inter_store(Dst, Keys) ->
-    call(mbulk_list([<<"SINTERSTORE">>, Dst | Keys])).
-
-%% @doc  return the union of all the sets
-%% O(n)
--spec set_union(Keys :: [key()]) ->
-    [value()] | error().
-set_union(Keys) ->
-    call(mbulk_list([<<"SUNION">> | Keys])).
-
-%% @doc compute the union between the sets and save the 
-%% resulting to new set
-%% O(n)
--spec set_union_store(Dst :: key(), Keys :: [key()]) ->
-    'ok' | error().
-set_union_store(Dst, Keys) ->
-    call(mbulk_list([<<"SUNIONSTORE">>, Dst | Keys])).
-
-%% @doc return the difference between the First set and all the other sets
-%% o(n)
--spec set_diff(First :: key(), Keys :: [key()]) ->
-    [value()] | error().
-set_diff(First, Keys) ->
-    call(mbulk_list([<<"SDIFF">>, First | Keys])).
-
-%% @doc compute the difference between the sets and save the 
-%% resulting to new set
-%% O(n)
--spec set_diff_store(Dst :: key(), First :: key(), Keys :: [key()]) ->
-    'ok' | error().
-set_diff_store(Dst, First, Keys) ->
-    call(mbulk_list([<<"SDIFFSTORE">>, Dst, First | Keys])).  
-
-%% @doc return all the members in the set
-%% O(1)
--spec set_members(Key :: key()) ->
-    [value()] | error().
-set_members(Key) ->
-    call(mbulk(<<"SMEMBERS">>, Key)).
-
-%% @doc return a random member from the set
-%% O(1)
--spec set_random_member(Key :: key()) ->
-    value() | error().
-set_random_member(Key) ->
-    call(mbulk(<<"SRANDMEMBER">>, Key)).
-
-%%------------------------------------------------------------------------------
-%% sorted set commands 
-%%------------------------------------------------------------------------------
-
-%% @doc add Mem to the sorted set stored at Key
-%% O(log(N))
--spec zset_add(Key :: key(), Mem :: str(), Score :: score()) ->
-    boolean().
-zset_add(Key, Mem, Score) ->
-    R = call(mbulk(<<"ZADD">>, Key, ?N2S(Score), Mem)),
-    int_may_bool(R).
-
-%% @doc remove the specified member from the sorted set
-%% O(log(N))
--spec zset_rm(Key :: key(), Mem :: str()) ->
-    boolean().
-zset_rm(Key, Mem) ->
-    R = call(mbulk(<<"ZREM">>, Key, Mem)),
-    int_may_bool(R).
-
-%% @doc If the member already exists increase its score, 
-%% otherwise add the member setting N as score
-%% O(log(N))
--spec zset_incr(Key :: key(), Mem :: str(), N :: integer()) ->
-    score().
-zset_incr(Key, Mem, N) ->
-    R = call(mbulk(<<"ZINCRBY">>, Key, ?N2S(N), Mem)),
-    string_to_score(R).
-
-%% @doc return the index(rank) of member in the sorted set, the scores being
-%% ordered from low to high
-%% O(log(N))
-%% Reids >= 1.3.4
--spec zset_index(Key :: key(), Mem :: key()) ->
-    integer().
-zset_index(Key, Mem) ->
-    call(mbulk(<<"ZRANK">>, Key, Mem)).
-
-%% @doc return the index(rank) of member in the sorted set, the scores being 
-%% ordered from high to low
-%% O(log(N))
-%% Reids >= 1.3.4
--spec zset_reverse_index(Key :: key(), Mem :: key()) ->
-    integer().
-zset_reverse_index(Key, Mem) ->
-    call(mbulk(<<"ZREVRANK">>, Key, Mem)).
-
-%% @doc return a range of elements from the sorted set
-%% O(log(N))+O(M)
--spec zset_range_index(Key :: key(), Start :: index(), End :: index(), 
-    WithScore :: boolean()) -> 
-        'null' | [value() | {key(), value()}].
-zset_range_index(Key, Start, End, WithScore) ->
-    do_zset_range_index(<<"ZRANGE">>, Key, Start, End, WithScore).
-
-%% @doc return a range of elements form the sorted set, like zset_range_index, but 
-%% the sorted set is ordered in traversed in reverse order.
--spec zset_range_index_reverse(Key :: key(), Start :: index(), End :: index(),
-    WithScore :: boolean()) -> 
-        'null' | [value() | {key(), value()}].
-zset_range_index_reverse(Key, Start, End, WithScore) ->
-    do_zset_range_index(<<"ZREVRANGE">>, Key, Start, End, WithScore).
-
-%% @doc return all elements with score in the specified scope
--spec zset_range_score(Key :: key(), Min :: score(), Max :: score(), 
-    WithScore :: boolean()) -> 
-        'null' | [value() | {key(), value()}].
-zset_range_score(Key, Min, Max, WithScore) ->
-    case WithScore of
-        false ->
-            call(mbulk(<<"ZRANGEBYSCORE">>, Key, 
-                score_to_string(Min), score_to_string(Max)));
-        true ->
-            L = call(mbulk_list([<<"ZRANGEBYSCORE">>, Key, 
-                score_to_string(Min), score_to_string(Max), <<"WITHSCORES">>])),
-            list_to_kv_tuple(L, fun(S) -> string_to_score(S) end)
-    end.
-
--spec zset_range_score(Key :: key(), Min :: score(), Max :: score(), 
-    Start :: index(), Count :: integer(), WithScore :: boolean()) ->
-        'null' | [value() | {key(), value()}].
-zset_range_score(Key, Min, Max, Start, Count, WithScore) ->
-    case WithScore of
-        false ->
-            call(mbulk_list([<<"ZRANGEBYSCORE">>, Key, 
-                score_to_string(Min), 
-                score_to_string(Max),
-                <<"LIMIT">>,
-                ?N2S(Start),
-                ?N2S(Count)
-                ]));
-        true ->
-            L = call(mbulk_list([<<"ZRANGEBYSCORE">>, Key, 
-                score_to_string(Min), 
-                score_to_string(Max),
-                <<"LIMIT">>,
-                ?N2S(Start),
-                ?N2S(Count),
-                <<"WITHSCORES">>
-                ])),
-            list_to_kv_tuple(L, fun(S) -> string_to_score(S) end)
-    end.
-
-%% @doc return the number of elements in sorted set
--spec zset_len(Key :: key()) ->
-    integer().
-zset_len(Key) ->
-    call(mbulk(<<"ZCARD">>, Key)).
-
-%% @doc return the score of the element
--spec zset_score(Key :: key(), Mem :: key()) ->
-    'null' | score().
-zset_score(Key, Mem) ->
-    call(mbulk(<<"ZSCORE">>, Key, Mem)).
-
-%% @doc remove the elements in the sorted set with index between start and end
--spec zset_rm_by_index(Key :: key(), Start :: index(), End :: index()) ->
-    integer().
-zset_rm_by_index(Key, Start, End) ->
-    call(mbulk(<<"ZREMRANGEBYRANK">>, Key, ?N2S(Start), ?N2S(End))).
-
-%% @doc remove the elements in the sorted set with score between start and end
--spec zset_rm_by_score(Key :: key(), Min :: score(), Max :: score()) ->
-    integer().
-zset_rm_by_score(Key, Min, Max) ->
-    call(mbulk(<<"ZREMRANGEBYSCORE">>, Key, ?N2S(Min), ?N2S(Max))).
-
-%% @doc return the intersection between the sorted sets, and save the 
-%% resulting to new sorted set.
--spec zset_union_store(key(), [key()]) ->
-    integer().
-zset_union_store(Dst, Keys) ->
-    call(mbulk_list([<<"ZUNIONSTORE">>, Dst, length(Keys) | Keys])).
-
-zset_union_store(Dst, Keys, Weights, Aggregate) ->
-    do_zset_store(<<"ZUNIONSTORE">>, Dst, Keys, Weights, Aggregate).
-
-%% @doc calculate the intersection between the sorted sets, and save the
-%% resulting to new sroted set with the key Dst.
--spec zset_inter_store(key(), [key()]) ->
-    integer().
-zset_inter_store(Dst, Keys) ->
-    call(mbulk_list([<<"ZINTERSTORE">>, Dst, length(Keys) | Keys])).
-
-zset_inter_store(Dst, Keys, Weights, Aggregate) ->
-    do_zset_store(<<"ZINTERSTORE">>, Dst, Keys, Weights, Aggregate).
-
-%%------------------------------------------------------------------------------
-%% hash commands 
-%%------------------------------------------------------------------------------
-
-%% @doc set specified hash filed with Val
-%% return true if the new field is created, otherwise just update the value with
-%% the specified field and return false
-%% O(1)
--spec hash_set(Key :: key(), field(), Val :: str()) ->
-    boolean().
-hash_set(Key, Field, Val) ->
-    R = call(mbulk(<<"HSET">>, Key, Field, Val)),
-    int_may_bool(R).
-
-%% @doc set specified hash filed with Val, 
-%% if the field exist no operation is performed
-%% O(1)
--spec hash_set_not_exists(key(), field(), str()) -> boolean().
-hash_set_not_exists(Key, Field, Val) ->
-    R = call(mbulk(<<"HSETNX">>, Key, Field, Val)),
-    int_may_bool(R).
-
-
-%% @doc set the hash fileds with the respective values,
-%%  if hash not exists, a new one will create
-%% O(N)
--spec hash_multi_set(key(), [{field(), str()}]) -> 'ok'.
-hash_multi_set(Key, FieldVals) ->
-    L = [<<"HMSET">>, Key | lists:append([[F, V] || {F, V} <- FieldVals])],
-    call(mbulk_list(L)).
-
-%% @doc retrieve the value of the specified hash field
-%% O(1)
--spec hash_get(Key :: key(), Field :: field()) ->
-    value().
-hash_get(Key, Field) ->
-    call(mbulk(<<"HGET">>, Key, Field)).
-
-
-%% @doc get the values of all specified fields
-%% O(1)
--spec hash_multi_get(key(), [field()]) ->
-    [value() | 'null'].
-hash_multi_get(Key, Fields) ->
-    call(mbulk_list([<<"HMGET">>, Key | Fields])).
-
-
-%% @doc If the field already exists increase its score, 
-%% otherwise add the field with N as score
-%% O(log(N))
--spec hash_incr(key(), field(), integer()) ->
-    score().
-hash_incr(Key, Field, N) ->
-    call(mbulk(<<"HINCRBY">>, Key, Field, ?N2S(N))).
-
-%% @doc remove the sepcified field from the hash
-%% O(1)
--spec hash_del(Key :: key(), Field :: field()) ->
-    boolean().
-hash_del(Key, Field) ->
-    R = call(mbulk(<<"HDEL">>, Key, Field)),
-    int_may_bool(R).
-
-%% @doc test if the field exists in the hash
-%% O(1)
--spec hash_exists(Key :: key(), Field :: field()) ->
-    boolean().
-hash_exists(Key, Field) ->
-    R = call(mbulk(<<"HEXISTS">>, Key, Field)),
-    int_may_bool(R).
-
-%% @doc return the number of items in hash
-%% O(1)
--spec hash_len(Key :: key()) -> integer().
-hash_len(Key) ->
-    call(mbulk(<<"HLEN">>, Key)).
-
-%% @doc return all the fields in hash
-%% O(n)
--spec hash_keys(Key :: key()) -> [value()].
-hash_keys(Key) ->
-    call(mbulk(<<"HKEYS">>, Key)).
-
-%% @doc return all the values in hash
--spec hash_vals(Key :: key()) -> [value()].
-hash_vals(Key) ->
-    call(mbulk(<<"HVALS">>, Key)).
-
-%% @doc return a tuple list include both the fields and values in hash
--spec hash_all(key()) -> [tuple()].
-hash_all(Key) ->
-    KFList = call(mbulk(<<"HGETALL">>, Key)),
-    list_to_kv_tuple(KFList).
-
-%%------------------------------------------------------------------------------
-%% sort commands
-%%------------------------------------------------------------------------------
-
-%% @doc sort a list or set accordingly to the parameters
+    int_may_bool(call(mbulk(<<"MOVE">>, Key, ?N2S(DBIndex)))).
+
+%% @doc Inspect the internals of Redis objects
+%% SubCmd: REFCOUNT, ENCODING, IDLETIME
+-spec object(command(), list()) -> integer() | str().
+object(SubCmd, Args) ->
+    call(mbulk_list([<<"OBJECT">>, SubCmd | Args])).
+
+%% @doc Remove the expiration from a key
+-spec persist(key()) -> boolean().
+persist(Key) ->
+    int_may_bool(call(mbulk("PERSIST", Key))).
+
+%% @doc return a random key from the keyspace
+-spec randomkey() -> key() | null().
+randomkey() ->
+    call(mbulk(<<"RANDOMKEY">>)).
+
+%% @doc atmoically rename a key
+-spec rename(OldKey :: key(), NewKey :: key()) -> 'ok' | error().
+rename(OldKey, NewKey) ->
+    call(mbulk(<<"RENAME">>, OldKey, NewKey)).
+
+%% @doc  rename a key, only if the new key does not exist
+-spec renamenx(Key :: key(), NewKey :: key()) -> boolean().
+renmaenx(Key, NewKey) ->
+    int_may_bool(call(mbulk(<<"RENAMENX">>, Key, NewKey))).
+
+%% @doc sort the list in a list, set or sorted set
 -spec sort(Key :: key(), SortOpt :: redis_sort()) -> list().
 sort(Key, SortOpt) ->
     #redis_sort{
@@ -849,22 +206,14 @@ sort(Key, SortOpt) ->
         store = Store
     } = SortOpt,
 
-    ByPart = 
-    case By of
-        "" ->
-            [];
-        _ ->
-            [<<"BY">>, By]
-    end,
-
+    ByPart = ?IF(is_empty_str(By), [], [<<"BY">>, By]),
     LimitPart = 
     case Limit of
-        null ->
-            [];
         {Start, End} ->
-            [<<"LIMIT">>, ?N2S(Start), ?N2S(End)]
+            [<<"LIMIT">>, ?N2S(Start), ?N2S(End)];
+        _ ->
+            []
     end,
-
     {FieldCount, GetPart} =
     case Get of
         [] ->
@@ -872,36 +221,530 @@ sort(Key, SortOpt) ->
         _ ->
             {length(Get), lists:append([[<<"GET">>, P] || P <- Get])}
     end,
-
-    AscPart =
-    case Asc of
-        true ->
-            [];
-        false ->
-            [<<"DESC">>]
-    end,
-
-    AlphaPart =
-    case Alpha of
-        false ->
-            [];
-        true ->
-            [<<"ALPHA">>]
-    end,
-
-    StorePart =
-    case Store of
-        "" ->
-            [];
-        _ ->
-            [<<"STORE">>, Store]
-    end,
-
+    AscPart = ?IF(is_empty_str(Asc), [], [<<"DESC">>]),
+    AlphaPart = ?IF(is_empty_str(Alpha), [], [<<"ALPHA">>]),
+    StorePart = ?IF(is_empty_str(Store), [], [<<"STORE">>, Store]),
     L = 
     call(mbulk_list([<<"SORT">>, Key | 
         lists:append([ByPart, LimitPart, GetPart, AscPart, AlphaPart, StorePart])
     ])),
     list_to_n_tuple(L, FieldCount).
+
+%% @doc get the time to live for a key
+-spec ttl(Key :: key()) -> integer().
+ttl(Key) ->
+    call(mbulk(<<"TTL">>, Key)).
+
+%% @doc determine the type of the value stored at key
+-spec type(Key :: key()) -> value_type().
+type(Key) ->
+    call(mbulk(<<"TYPE">>, Key)).
+
+%% @doc excute a lua script at server side
+-spec eval(Script :: str(), NumKeys :: count(), Keys :: [key()], Args :: [str()]) -> value().
+eval(Script, NumKeys, Keys, Args) ->
+    call(mbulk_list([<<"EVAL">>, Script, ?N2S(NumKeys) | Keys ++ Args])).
+
+
+
+
+%% @doc return the nubmer of keys in all the currently selected database
+%% O(1)
+-spec dbsize() -> count().
+dbsize() ->
+    call(mbulk(<<"DBSIZE">>)).
+
+
+%% @doc select the DB with have the specified zero-based numeric index
+-spec select(Index :: index()) ->
+    'ok' | error().
+select(Index) ->
+    R = call(mbulk(<<"SELECT">>, ?N2S(Index))),
+    case R of
+        ok ->
+            redis_client:set_selected_db(Client, Index);
+        Other ->
+            Other
+    end.
+
+%% @doc _delete_ all the keys of the currently selected DB
+-spec flush_db() -> 'ok'.
+flush_db() ->
+    call(mbulk(<<"FLUSHDB">>)).
+            
+%% @doc _delete_ all the keys of existing databases in redis server
+-spec flush_all() -> 'ok'.
+flush_all() ->
+    call(mbulk(<<"FLUSHALL">>)).
+
+%%-----------------------------------------
+%% string commands 
+%%-----------------------------------------
+
+%% @doc append a value to the string stored at key,
+%%      return the new string length
+-spec append(key(), val()) -> integer().
+append(Key, Val) ->
+    call(mbulk(<<"APPEND">>, Key, Val)).
+
+%% @doc decrease the integer value of key by one
+-spec decr(key()) -> integer().
+decr(Key) ->
+    call(mbulk(<<"DECR">>, Key)).
+
+%% @doc decrease the integer value of key by given number
+-spec decr(key(), integer()) -> integer().
+decrby(Key, N) ->
+    call(mbulk(<<"DECRBY">>, Key, ?N2S(N))).
+
+%% @doc get the value of a key
+-spec get(key()) -> val().
+get(Key) ->
+    call(mbulk(<<"GET">>, Key)).
+
+%% @doc return the bit value at offset in the string value
+%% stored at key
+-spec getbit(key(), uint()) -> integer().
+getbit(Key, Offset) ->
+    call(mbulk(<<"GITBIT">>, Key, Offset)).
+
+%% @doc return a substring of the string stored at a key
+-spec getrange(key(), int(), int()) -> str().
+getrange(Key, Start, End) ->
+    call(mbulk(<<"GETRANGE">>, Key, Start, End)).
+
+%% @doc atomaticly set the value and return the old value
+-spec getset(key(), str()) -> val().
+getset(Key, Val) ->
+    call(mbulk(<<"GETSET">>, Key, Val)).
+
+%% @doc increase the integer value of a key by one
+-spec incr(key()) -> int().
+incr(Key) ->
+    call(mbulk(<<"INCR">>, Key)).
+
+%% @doc increase the integer value of key by integer
+-spec incrby(key(), int()) -> int().
+incrby(Key, N) ->
+    call(mbulk(<<"INCRBY">>, Key, ?N2S(N))).
+
+%% @doc get the values of all the given keys
+-spec mget([key()]) -> [val()].
+mget(Keys) ->
+    call(mbulk_list([<<"MGET">> | Keys])).
+
+%% @doc set multiple keys to respective values
+-spec mset([{key(), str()}]) -> 'ok'.
+mset(KeyVals) ->
+    L = [<<"MSET">> | lists:append([[K, V] || {K, V} <- KeyVals])],
+    call(mbulk_list(L)).
+
+%% @doc set multiple keys to respective values, only if
+%% none of the keys exist
+-spec msetnx(KeyVals :: [{key(), str()}]) -> boolean().
+msetnx(KeyVals) ->
+    L = [<<"MSETNX">> | lists:append([[K, V] || {K, V} <- KeyVals])],
+    int_may_bool(call(mbulk_list(L))).
+
+%% @doc set the string value of the key 
+-spec set(key(), str()) -> 'ok'.
+set(Key, Val) ->
+    call(mbulk(<<"SET">>, Key, Val)).
+
+%% @doc set or clears the bit at offset in the string value
+%% stored at key
+-spec setbit(key(), uint(), 0 | 1) -> uint().
+setbit(Key, Offset, Val) ->
+    call(mbulk(<<"SETBIT">>, Key, ?N2S(Offset), Val)).
+
+%% @doc set the string value of the key with expired time
+-spec setex(key(), str(), second()) ->
+    'ok' | status_code().
+setex(Key, Val, Expire) ->
+    call(mbulk(<<"SETEX">>, Key, ?N2S(Expire), Val)).
+
+%% @doc set the string value of the key, only if the key 
+%% does not exist
+-spec setnx(key(), str()) -> boolean().
+setnx(Key, Val) ->
+    call(mbulk(<<"SETNX">>, Key, Val)).
+
+%% @doc overwrite part of the string at key
+%% return the new string length
+-spec setrange(key(), uint(), str()) -> uint().
+setrange(Key, Start, Val) ->
+    call(mbulk(<<"SETRANGE">>, Key, ?N2S(Start), Val)).
+
+%% @doc get the length of the value stored in a key
+-spec strlen(key()) -> uint().
+strlen(Key) ->
+    call(mbulk(<<"STRLEN">>, Key)).
+
+%%--------------------------------
+%% hashes
+%%--------------------------------
+
+%% @doc delete one or more hash fields
+-spec hdel(key(), [key()]) -> boolean().
+hdel(Key, [H|_] = Field) when is_list(H); is_binary(H) ->
+    call(mbulk_list([<<"HDEL">> | Field]));
+hdel(Key, Field) ->
+    call(mbulk(<<"HDEL">>, Field)).
+
+%% @doc determine if a hash field exists
+-spec hexists(key(), key()) -> boolean().
+hexists(Key, Field) ->
+    int_may_bool(call(mbulk(<<"HEXISTS">>, Key, Field))).
+
+%% @doc get the value of the a hash field
+-spec hget(key(), key()) -> val().
+hget(Key, Field) ->
+    call(mbulk(<<"HGET">>, Key, Field)).
+
+%% @doc get all the fields and values in a hash
+-spec hgetall(key()) -> [{key(), str()}].
+hgetall(Key) ->
+    list_to_kv_tuple(call(mbulk(<<"HGETALL">>, Key))).
+
+%% @doc increment the integer value of a hash filed by
+%% given numer
+-spec hincrby(key(), key(), int()) -> int().
+hincrby(Key, Field, N) ->
+    call(mbulk(<<"HINCRBY">>, Key, Field, ?N2S(N))).
+
+%% @doc get all the fields in hash
+-spec hkeys(key()) -> [val()].
+hkeys(Key) ->
+    call(mbulk(<<"HKEYS">>, Key)).
+
+%% @doc get the number of fields in hash
+-spec hlen(key()) -> integer().
+hlen(Key) ->
+    call(mbulk(<<"HLEN">>, Key)).
+
+%% @doc get the values of all specified fields
+-spec hmget(key(), [key()]) -> [val()].
+hmget(Key, Fields) ->
+    call(mbulk_list([<<"HMGET">>, Key | Fields])).
+
+%% @doc Set multiple hash fields to multiple values
+-spec hmset(key(), [{key(), str()}]) -> 'ok'.
+hmset(Key, FieldVals) ->
+    L = [<<"HMSET">>, Key | lists:append([[F, V] || {F, V} <- FieldVals])],
+    call(mbulk_list(L)).
+
+%% @doc set the string value of a hash filed with 
+-spec hset(key(), key(), str()) -> boolean().
+hset(Key, Field, Val) ->
+    int_my_bool(call(mbulk(<<"HSET">>, Key, Field, Val))).
+
+%% @doc Set the value of a hash field, only if the field 
+%% does not exist
+-spec hsetnx(key(), key(), str()) -> boolean().
+hsetnx(Key, Field, Val) ->
+    int_may_bool(call(mbulk(<<"HSETNX">>, Key, Field, Val))).
+
+%% @doc return all the values in hash
+-spec hvals(key()) -> [val()].
+hvals(Key) ->
+    call(mbulk(<<"HVALS">>, Key)).
+
+%%------------------------
+%% lists
+%%------------------------
+
+%% @doc Remove and get the first element in a list, or block
+%% until one is available
+-spec blpop([key()], timeout()) -> val().
+blpop(Keys, Timeout) ->
+    L = mbulk_list([<<"BLPOP">> | Keys ++ [timeout_val(Timeout)]]),
+    call(L).
+
+%% @doc Remove and get the last element in a list, 
+%% or block until one is available
+-spec brpop([key()], timeout()) ->
+    value().
+brpop(Keys, Timeout) ->
+    call(mbulk_list([<<"BRPOP">> | (Keys ++ [timeout_val(Timeout)])]), Timeout).
+
+%% @doc Pop a value from a list, push it to another list 
+%% and return it; or block until one is available
+-spec brpoplpush(key(), key(), timeout()) -> val().
+brpoplpush(Src, Dst, Timeout) ->
+    call(mbulk(<<"BRPOPLPUSH">>, Src, Dst, timeout_str(Timeout))). 
+
+%% @doc Get an element from a list by its index
+-spec lindex(key(), uint()) -> val().
+lindex(Key, Idx) ->
+    call(mbulk(<<"LINDEX">>, Key, ?N2S(Idx))).
+
+%% @doc Insert an element before or after another 
+%% element in a list
+-spec linsert(key(), 'before' | 'after', key(), val()) -> int().
+linsert(Key, Pos, Pivot, Val) when Pos =:= 'before'; Pos =:= 'after' ->
+    PosStr = 
+    case Pos of 
+        before -> <<"BEFORE">>;
+        _ -> <<"AFTER">>
+    end,
+    call(mbulk(<<"LINSERT">>, PosStr, Pivot, Val)).
+
+%% @doc get the length of the list
+-spec llen(key()) -> uint().
+llen(Key) ->
+    call(mbulk(<<"LLEN">>, Key)).
+
+%% @doc remove and get the first element of the list
+-spec lpop(key()) -> val().
+lpop(Key) ->
+    call(mbulk(<<"LPOP">>, Key)).
+
+%% @doc add multiple values to the head of the list 
+-spec lpush(key(), str() | [str()]) -> uint().
+lpush(Key, [H|_] = Val) when is_list(H); is_binary(H) ->
+    call(mbulk_list([<<"LPUSH">>, Key | Val]));
+lpush(Key, Val) ->
+    call(mbulk(<<"LPUSH">>, Key, Val)).
+
+%% @doc add value to the head of the list, only if the list exist
+-spec lpushx(key(), str()) -> uint().
+lpushx(Key, Val) ->
+    call(mbulk(<<"LPUSHX">>, Key, Val)).
+
+%% @doc Get a range of elements from a list
+-spec lrange(key(), int(), int()) -> [val()].
+list_range(Key, Start, End) ->
+    to_list(call(mbulk(<<"LRANGE">>, Key, ?N2S(Start), ?N2S(End)))).
+
+%% @doc Remove elements from a list
+%% N > 0, from head to tail
+%% N < 0, from tail to head
+%% N = 0, remove all elements equal to Val
+-spec lrem(key(), int(), str()) -> uint().
+lrem(Key, N, Val) ->
+    call(mbulk(<<"LREM">>, Key, ?N2S(N), Val)).
+
+%% @doc Set the value of an element in a list by its index
+-spec lset(key(), int(), str()) -> 'ok'.
+lset(Key, Idx, Val) ->
+    call(mbulk(<<"LSET">>, Key, ?N2S(Idx), Val)).
+
+%% @doc Trim a list to the specified range
+-spec ltrim(key(), int(), int()) -> 'ok'.
+ltrim(Key, Start, End) ->
+    call(mbulk(<<"LTRIM">>, Key, ?N2S(Start), ?N2S(End))).
+
+%% @doc Remove and get the last element in a list
+-spec rpop(key()) -> val().
+rpop(Key) ->
+    call(mbulk(<<"RPOP">>, Key)).
+
+%% @doc Remove the last element in a list, append it to 
+%% another list and return it
+-spec rpoplpush(key(), key()) -> val().
+rpoplpush(Src, Dst) ->
+    call(mbulk(<<"RPOPLPUSH">>, Src, Dst)).
+
+%% @doc Append one or multiple values to a list
+-spec rpush(key(), str() | [str()]) -> uint().
+rpush(Key, [H|_] = Val) when is_list(H); is_binary(H) ->
+    call(mbulk_list([<<"RPUSH">>, Key | Val]));
+rpush(Key, Val) ->
+    call(mbulk(<<"RPUSH">>, Key, Val)).
+
+%% @doc add value to the tail of the list, only if the list exist
+-spec rpushx(key(), str()) -> uint().
+rpushx(Key, Val) ->
+    call(mbulk(<<"RPUSHX">>, Key, Val)).
+
+%%--------------------------------------
+%% sets (in set all members is distinct)
+%%--------------------------------------
+
+%% @doc Add one or more members to a set
+-spec sadd(key(), str()) -> uint().
+sadd(Key, [H|_] = Mem) when is_list(H); is_binary(H) ->
+    call(mbulk_list([<<"SADD">>, Key | Mem]));
+sadd(Key, Mem) ->
+    call(mbulk(<<"SADD">>, Key, Mem)).
+
+%% @doc return the number of elements in set
+-spec scard(key()) -> uint().
+scard(Key) ->
+    call(mbulk(<<"SCARD">>, Key)).
+
+%% @doc Subtract multiple sets
+-spec sdiff(key(), [key()]) -> [val()].
+sdiff(First, Keys) ->
+    call(mbulk_list([<<"SDIFF">>, First | Keys])).
+
+%% @doc Subtract multiple sets and store the resulting 
+%% set in a key
+-spec sdiffstore(key(), key(), [key()]) -> uint().
+sdiffstore(Dst, First, Keys) ->
+    call(mbulk_list([<<"SDIFFSTORE">>, Dst, First | Keys])).  
+
+%% @doc return the intersection between the sets
+-spec sinter([key()]) -> [val()].
+sinter(Keys) ->
+    call(mbulk_list([<<"SINTER">> | Keys])).
+
+%% @doc Intersect multiple sets and store the 
+%% resulting set in a key
+-spec sinterstore(key(), [key()]) -> uint().
+sinterstore(Dst, Keys) ->
+    call(mbulk_list([<<"SINTERSTORE">>, Dst | Keys])).
+
+%% @doc Determine if a given value is a member of a set
+-spec sismember(key(), str()) -> boolean().
+sismember(Key, Mem) ->
+    int_may_bool(call(mbulk(<<"SISMEMBER">>, Key, Mem))).
+
+%% @doc get all the members in the set
+-spec smembers(key()) -> boolean().
+smembers(Key) ->
+    call(mbulk(<<"SMEMBERS">>, Key)).
+
+%% @doc Move a member from one set to another
+-spec smove(key(), key(), str()) -> boolean().
+smove(Src, Dst, Mem) ->
+    int_may_bool(call(mbulk(<<"SMOVE">>, Src, Dst, Mem))).
+
+%% @doc Remove and return a random member from a set
+-spec spop(key()) -> val().
+spop(Key) ->
+    call(mbulk(<<"SPOP">>, Key)).
+
+%% @doc Get a random member from a set
+-spec srandmember(key()) -> val().
+srandmember(Key) ->
+    call(mbulk(<<"SRANDMEMBER">>, Key)).
+
+%% @doc Remove one or more members from a set
+-spec srm(key(), key() | [key()]) -> boolean().
+srm(Key, [H|_] = Mem) when is_list(H); is_binary(H) ->
+    mbulk_list([<<"SREM">>, Key | Mem]);
+srm(Key, Mem) ->
+    call(mbulk(<<"SREM">>, Key, Mem)).
+
+%% @doc  Add multiple sets
+-spec sunion([key()]) -> [val()].
+sunion(Keys) ->
+    call(mbulk_list([<<"SUNION">> | Keys])).
+
+%% @doc Add multiple sets and store the resulting set in a key
+-spec sunionstore(key(), [key()]) -> uint().
+sunionstore(Dst, Keys) ->
+    call(mbulk_list([<<"SUNIONSTORE">>, Dst | Keys])).
+
+%%--------------------
+%% sorted sets
+%%--------------------
+
+%% @doc Add one or more members to a sorted set, or 
+%% update its score if it already exists
+-spec zadd(key(), [{score(), str()}]) -> uint().
+zadd(Key, Mem) ->
+    L = [[?N2S(Score), Val] || {Score, Val} <- Mem],
+    call(mbulk_list([<<"ZADD">>, Key | L])).
+
+%% @doc return the number of elements in sorted set
+-spec zcard(key()) -> uint().
+zcard(Key) ->
+    call(mbulk(<<"ZCARD">>, Key)).
+
+%% @doc Count the members in a sorted set with 
+%% scores within the given values
+-spec zcount(key(), score(), score()) -> uint().
+zcount(Key, Min, Max) ->
+    MinStr = score_to_str(Min),
+    MaxStr = score_to_str(Max),
+    call(mbulk(<<"ZCOUNT">>, Key, MinStr, MaxStr))).
+
+%% @doc Increment the score of a member in a sorted set
+-spec zincrby(key(), int(), key()) -> score().
+zincrby(Key, N, Mem) ->
+    str_to_score(call(mbulk(<<"ZINCRBY">>, Key, ?N2S(N), Mem))).
+
+%% @doc Intersect multiple sorted sets and store 
+%% the resulting sorted set in a new key
+zinterstore(Dst, Keys) ->
+    zinterstore(Dst, Keys, [], sum);
+zinterstore(Dst, Keys, Weights) ->
+    ?ASSERT(length(Keys) =:= length(Weights)),
+    zinterstore(Dst, Keys, Weights, sum);
+zinterstore(Dst, Keys, Weights, Aggregate) ->
+    do_zset_store(<<"ZINTERSTORE">>, Dst, Keys, Weights, Aggregate).
+
+%% @doc Return a range of members in a sorted set, by index
+-spec zrange(key(), int(), int(), boolean()) -> 
+    [val()] | [{key(), val()}].
+zrange(Key, Start, End, WithScore) ->
+    do_zrange(<<"ZRANGE">>, Key, Start, End, WithScore).
+
+%% @doc Return a range of members in a sorted set, by score
+-spec zrangebyscore(key(), score(), score(), boolean()) -> 
+    [val()] | [{key(), val()}].
+zrangebyscore(Key, Min, Max, WithScore) ->
+    do_zrange_by_score(<<"ZRANGEBYSCORE">>, Key, Start, End, WithScore).
+
+%% @doc Determine the index of a member in a sorted set
+-spec zrank(key(), key()) -> int() | null().
+zrank(Key, Mem) ->
+    call(mbulk(<<"ZRANK">>, Key, Mem)).
+
+%% @doc Remove one or more members from a sorted set
+-spec zrem(key(), key() | [key()]) -> uint().
+zrem(Key, [H|_] = Mem) when is_list(H); is_binary(H) ->
+    call(mbulk_list(<<"ZREM">>, Key | Mem));
+zrem(Key, Mem) ->
+    call(mbulk(<<"ZREM">>, Key, Mem)).
+
+%% @doc Remove all members in a sorted set within the given indexes
+-spec zremrangebyrank(key(), uint(), uint()) -> uint().
+zremrangebyrank(Key, Start, End) ->
+    call(mbulk(<<"ZREMRANGEBYRANK">>, Key, ?N2S(Start), ?N2S(End))).
+
+%% @doc Remove all members in a sorted set within the given scores
+-spec zremrangebyscore(key(), score(), score()) -> uint().
+zremrangebyscore(Key, Min, Max) ->
+    call(mbulk(<<"ZREMRANGEBYSCORE">>, Key, 
+            score_to_str(Min), score_to_str(Max))).
+
+%% @doc Return a range of members in a sorted set, by index,
+%% with scores ordered from high to low
+-spec zrevrange(key(), int(), int(), boolean()) -> 
+    [value()] | [{key(), value()}].
+zrevrange(Key, Start, End, WithScore) ->
+    do_zrange(<<"ZREVRANGE">>, Key, Start, End, WithScore).
+
+%% @doc Return a range of members in a sorted set, by score,
+%% with scores ordered from high to low
+-spec zrevrangebyscore(key(), score(), score(), boolean()) -> 
+    [val()] | [{key(), val()}].
+zrevrangebyscore(Key, Min, Max, WithScore) ->
+    do_zrange_by_score(<<"ZREVRANGEBYSCORE">>, Key, Start, End, WithScore).
+
+%% @doc Determine the index of a member in a sorted set, 
+%% with scores ordered from high to low
+-spec zrevrange(key(), key()) -> int() | null().
+zrevrange(Key, Mem) ->
+    call(mbulk(<<"ZREVRANK">>, Key, Mem)).
+
+%% @doc Get the score associated with the given member 
+%% in a sorted set
+-spec zscore(key(), key()) -> score() | null().
+zscore(Key, Mem) ->
+    call(mbulk(<<"ZSCORE">>, Key, Mem)).
+
+%% @doc Add multiple sorted sets and store 
+%% the resulting sorted set in a new key
+-spec zunionstore(key(), [key()]) ->
+    integer().
+zunionstore(Dst, Keys) ->
+    zunionstore(Dst, Keys, [], sum).
+zunionstore(Dst, Keys, Weights, Aggregate) ->
+    do_zset_store(<<"ZUNIONSTORE">>, Dst, Keys, Weights, Aggregate).
 
 %%------------------------------------------------------------------------------
 %% transaction commands 
@@ -938,19 +781,19 @@ trans_abort() ->
 -spec subscribe([channel()], fun(), fun()) ->
     'ok'.
 subscribe(Channels, CbSub, CbMsg) ->
-    redis_client:subscribe(PClient, Channels, CbSub, CbMsg).
+    redis_client:subscribe(Client, Channels, CbSub, CbMsg).
 
 %% @doc unsubscribe to all channels
 -spec unsubscribe(fun()) ->
     'ok'.
 unsubscribe(CbUnSub) ->
-    redis_client:unsubscribe(PClient, CbUnSub).
+    redis_client:unsubscribe(Client, CbUnSub).
 
 %% @doc unsubscribe some channels
 -spec unsubscribe([channel()], fun()) ->
     'ok'.
 unsubscribe(Channels, CbUnSub) ->
-    redis_client:unsubscribe(PClient, Channels, CbUnSub).
+    redis_client:unsubscribe(Client, Channels, CbUnSub).
 
 %% @doc publish message to channel
 -spec publish(channel(), str()) ->
@@ -981,7 +824,7 @@ lastsave_time() ->
 %% @doc synchronously save the DB on disk, then shutdown the server
 -spec shutdown() -> 'ok' | error().
 shutdown() ->
-    redis_client:shutdown(PClient).
+    redis_client:shutdown(Client).
 
 %% @doc rewrite the append only log in background
 -spec bg_rewrite_aof() -> 'ok' | error().
@@ -1041,59 +884,70 @@ command(Args) ->
 %%
 %%------------------------------------------------------------------------------
 
-%% get sorted set range by index
-do_zset_range_index(Cmd, Key, Start, End, WithScore) ->
+%% get sorted set in range, by index
+do_zrange(Cmd, Key, Start, End, false) ->
+    call(mbulk(Cmd, Key, ?N2S(Start), ?N2S(End)));
+do_zrange(Cmd, Key, Start, End, true) ->
+    L = call(mbulk_list([Cmd, Key, ?N2S(Start), ?N2S(End), <<"WITHSCORES">>])),
+    list_to_kv_tuple(L, fun(S) -> str_to_score(S) end).
+
+%% get sorted set in range, by score
+do_zrange_by_score(Cmd, Key, Min, Max, false) ->
+    call(mbulk(Cmd, Key, score_to_str(Min), score_to_str(Max)));
+do_zrange_by_score(Cmd, Key, Min, Max, true) ->
+    L = call(mbulk_list([Cmd, Key, 
+        score_to_str(Min), score_to_str(Max), <<"WITHSCORES">>])),
+    list_to_kv_tuple(L, fun(S) -> str_to_score(S) end).
+
+-spec zset_range_score(Key :: key(), Min :: score(), Max :: score(), 
+    Start :: index(), Count :: integer(), WithScore :: boolean()) ->
+        'null' | [value() | {key(), value()}].
+zset_range_score(Key, Min, Max, Start, Count, WithScore) ->
     case WithScore of
-        true ->
-            L = call(mbulk_list([Cmd, Key, ?N2S(Start), ?N2S(End), <<"WITHSCORES">>])),
-            list_to_kv_tuple(L, fun(S) -> string_to_score(S) end);
         false ->
-            call(mbulk(Cmd, Key, ?N2S(Start), ?N2S(End)))
+            call(mbulk_list([<<"ZRANGEBYSCORE">>, Key, 
+                score_to_str(Min), 
+                score_to_str(Max),
+                <<"LIMIT">>,
+                ?N2S(Start),
+                ?N2S(Count)
+                ]));
+        true ->
+            L = call(mbulk_list([<<"ZRANGEBYSCORE">>, Key, 
+                score_to_str(Min), 
+                score_to_str(Max),
+                <<"LIMIT">>,
+                ?N2S(Start),
+                ?N2S(Count),
+                <<"WITHSCORES">>
+                ])),
+            list_to_kv_tuple(L, fun(S) -> str_to_score(S) end)
     end.
+
+
+
+
 
 do_zset_store(Cmd, Dst, Keys, Weights, Aggregate) when
         Aggregate =:= sum;
         Aggregate =:= min;
         Aggregate =:= max ->
-    call(mbulk_list([Cmd, Dst, length(Keys) | 
-                (Keys 
-                    ++ [<<"WEIGHTS">> | Weights] 
-                    ++ [<<"AGGREGATE">>, aggregate_to_str(Aggregate)])]
-        )).
+    L = Keys 
+    ++ ?IF(Weights =:= [], [], [<<"WEIGHTS">> | Weights])
+    ++ [<<"AGGREGATE">>, aggregate_to_str(Aggregate)],
+    call(mbulk_list([Cmd, Dst, length(Keys) | L])).
 
 call(Cmd) ->
-    redis_client:command(PClient, Cmd).
+    redis_client:command(Client, Cmd).
 
 call(Cmd, Timeout) ->
-    redis_client:command(PClient, Cmd, Timeout).
-
-%% convert score to string
-score_to_string(S) when is_integer(S) ->
-    ?N2S(S);
-score_to_string(S) when is_list(S) ->
-    S.
-
-%% string => score
-string_to_score(B) when is_binary(B) ->
-    string_to_score(binary_to_list(B));
-string_to_score(S) when is_list(S) ->
-    case catch list_to_integer(S) of
-        {'EXIT', _} ->
-            list_to_float(S);
-        N ->
-            N
-    end.
+    redis_client:command(Client, Cmd, Timeout).
 
 %% the timeout value
 timeout_val(infinity) ->
-    0;
+    "0";
 timeout_val(T) when is_integer(T), T >= 0 ->
-    T.
-
-%% convert to boolean if the value is possible, otherwise return the value self
-int_may_bool(0) -> false;
-int_may_bool(1) -> true;
-int_may_bool(V) -> V.
+    ?N2S(T).
 
 %% get the application vsn
 %% return 'undefined' | string().
@@ -1106,33 +960,6 @@ get_app_vsn() ->
             {ok, Vsn} = application:get_key(App, vsn),
             Vsn
     end.
-
-%% convert list like [f1, v1, f2, v2] to the key-value tuple
-%% [{f1, v1}, {f2, v2}].
-list_to_kv_tuple(null) ->
-    null;
-list_to_kv_tuple(L) ->
-    list_to_kv_tuple(L, null).
-
-list_to_kv_tuple([], _Fun) ->
-    [];
-list_to_kv_tuple(L, Fun) ->
-    {odd, null, AccL} =
-    lists:foldl(
-        fun
-            (E, {odd, null, AccL}) ->
-                {even, E, AccL};
-            (E, {even, EFirst, AccL}) ->
-                {odd, null, [{EFirst, do_fun(Fun, E)} | AccL]}
-        end,
-    {odd, null, []}, L),
-    lists:reverse(AccL).
-
-%% call the function on the element
-do_fun(null, E) ->
-    E;
-do_fun(Fun, E) ->
-    Fun(E).
 
 %% convert list to n elments tuple list
 list_to_n_tuple([], _N) ->
@@ -1162,3 +989,74 @@ entry_to_str(L) ->
     [ lists:concat([Time, " ", Change])
         || {Time, Change} <- L, is_integer(Time), is_integer(Change)],
     string:join(L2, " ").
+
+%% if the value is empty string
+is_empty_str("") -> true;
+is_empty_str(<<>>) -> true;
+is_empty_str(_) -> false.
+
+%% score convert string for zset
+score_to_str('-inf') ->
+    <<"-inf">>.
+score_to_str('+inf') ->
+    <<"+inf">>.
+score_to_str({open, S}) ->
+    ?N2S(S); 
+score_to_str({closed, S}) ->
+    [$( | ?N2S(S)];
+score_to_str(S) when is_integer(S) ->
+    ?N2S(S);
+score_to_str(S) when is_float(S) ->
+    erlang:float_to_list(S).
+
+%%------------------
+%% handle the reply
+%%------------------
+
+%% convert to boolean if the value is possible, otherwise return the value self
+int_may_bool(0) -> false;
+int_may_bool(1) -> true;
+int_may_bool(V) -> V.
+
+%% convert list like [f1, v1, f2, v2] to the key-value tuple
+%% [{f1, v1}, {f2, v2}].
+list_to_kv_tuple(null) ->
+    [];
+list_to_kv_tuple(L) ->
+    list_to_kv_tuple(L, null).
+
+list_to_kv_tuple([], _Fun) ->
+    [];
+list_to_kv_tuple(L, Fun) ->
+    {odd, null, AccL} =
+    lists:foldl(
+        fun
+            (E, {odd, null, AccL}) ->
+                {even, E, AccL};
+            (E, {even, EFirst, AccL}) ->
+                {odd, null, [{EFirst, do_fun(Fun, E)} | AccL]}
+        end,
+    {odd, null, []}, L),
+    lists:reverse(AccL).
+
+%% call the function on the element
+do_fun(null, E) ->
+    E;
+do_fun(Fun, E) ->
+    Fun(E).
+
+%% convert reply to list
+to_list(null) -> [];
+to_list(L) when is_list(L) -> L.
+
+%% string => score
+str_to_score(B) when is_binary(B) ->
+    str_to_score(binary_to_list(B));
+str_to_score(S) when is_list(S) ->
+    case catch list_to_integer(S) of
+        {'EXIT', _} ->
+            list_to_float(S);
+        N ->
+            N
+    end.
+
