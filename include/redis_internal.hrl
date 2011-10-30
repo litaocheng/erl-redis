@@ -70,7 +70,6 @@
 -type int() :: integer().
 
 -type length() :: non_neg_integer().
--type pattern() :: binary() | [byte()].
 -type passwd() :: [byte()] | binary().
 -type second() :: non_neg_integer().
 -type timestamp() :: non_neg_integer().
@@ -82,7 +81,16 @@
 {open, integer() | float()} | {closed, integer() | float()}.
 -type aggregate() :: 'sum' | 'min' | 'max'.
 -type count() :: non_neg_integer().
+
+-type pattern() :: str().
 -type channel() :: str().
+-type psubscribe_fun() :: fun((pattern(), count()) -> any()).
+-type pmessage_fun() :: fun((pattern(), channel(), str()) -> any()).
+-type punsubscribe_fun() :: fun((pattern(), count()) -> any()).
+-type subscribe_fun() :: fun((channel(), count()) -> any()).
+-type message_fun() :: fun((channel(), str()) -> any()).
+-type unsubscribe_fun() :: fun((channel(), count()) -> any()).
+
 -type client() :: pid() | atom().
 
 -type inet_host() :: atom() | string() | binary().

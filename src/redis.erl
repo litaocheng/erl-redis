@@ -17,9 +17,6 @@
 
 -export([i/0, version/0, db/0]).
 
-%% connection handling
--export([auth/1, ping/0]).
-
 %% keys
 -export([del/1, exists/1, expire/2, expireat/2, keys/1, move/2,
         object/2, persist/1, randomkey/0, rename/2, renamenx/2, 
@@ -52,18 +49,24 @@
         zremrangebyrank/3, zremrangebyscore/3, zrevrange/4,
         zrevrangebyscore/4, zrevrank/2, zscore/2, zunionstore/4]).
 
-%% transaction commands
--export([watch/1, unwatch/0,
-        trans_begin/0, trans_commit/0, trans_abort/0]).
+%% pub/sub
+-export([psubscribe/1, subscribe/1, 
+        publish/2, 
+        punsubscribe/0, punsubscribe/1, 
+        unsubscribe/0, unsubscribe/1]).
 
-%% pubsub commands
--export([subscribe/3, unsubscribe/1, unsubscribe/2, publish/2]).
+%% transactions
+-export([multi/0, exec/0, discard/0,
+        watch/1, unwatch/0]).
 
-%% persistence commands
--export([save/0, bg_save/0, lastsave_time/0, shutdown/0, bg_rewrite_aof/0]).
+%% connection
+-export([auth/1, echo/1, ping/0, quit/0]).
 
-%% remote server commands
--export([info/0, slave_off/0, slave_of/2, config_get/1, config_set/2]).
+%% server 
+-export([config_get/1, config_set/2, config_resetstat/0,
+        dbsize/0, debug_object/1, debug_segfault/0,
+        flushall/0, flushdb/0, info/0, lastsave/0, slave_of/2, 
+        slave_off/0, slowlog/2, sync/0]).
 
 %% other unknown commands
 -export([command/1]).
@@ -101,20 +104,6 @@ version() ->
 -spec db() -> uint().
 db() ->
     redis_manager:get_selected_db(Client).
-
-%%------------------------------------------------------------------------------
-%% connection handling
-%%------------------------------------------------------------------------------
-
-%% @doc simple password authentication
--spec auth(iolist()) -> 'ok' | error().
-auth(Pass) ->
-    call(mbulk(<<"AUTH">>, Pass)).
-
-%% @doc ping the redis server
--spec ping() -> 'ok' | error().
-ping() ->
-    call(mbulk(<<"PING">>)).
 
 %%-------
 %% keys
@@ -157,10 +146,10 @@ expire_at(Key, TimeStamp) ->
 
 %% @doc return the keys list matching a given pattern
 %% O(n)
--spec keys(Pattern :: pattern()) -> 
+-spec keys(Pattern :: str()) -> 
     [key()].
 keys(Pattern) ->
-    to_list(call(mbulk(<<"KEYS">>, Pattern))).
+    may_null_to_list(call(mbulk(<<"KEYS">>, Pattern))).
 
 %% @doc move a key to anthor db
 -spec move(key(), uint()) ->
@@ -245,37 +234,6 @@ type(Key) ->
 eval(Script, NumKeys, Keys, Args) ->
     call(mbulk_list([<<"EVAL">>, Script, ?N2S(NumKeys) | Keys ++ Args])).
 
-
-
-
-%% @doc return the nubmer of keys in all the currently selected database
-%% O(1)
--spec dbsize() -> count().
-dbsize() ->
-    call(mbulk(<<"DBSIZE">>)).
-
-
-%% @doc select the DB with have the specified zero-based numeric index
--spec select(Index :: index()) ->
-    'ok' | error().
-select(Index) ->
-    R = call(mbulk(<<"SELECT">>, ?N2S(Index))),
-    case R of
-        ok ->
-            redis_client:set_selected_db(Client, Index);
-        Other ->
-            Other
-    end.
-
-%% @doc _delete_ all the keys of the currently selected DB
--spec flush_db() -> 'ok'.
-flush_db() ->
-    call(mbulk(<<"FLUSHDB">>)).
-            
-%% @doc _delete_ all the keys of existing databases in redis server
--spec flush_all() -> 'ok'.
-flush_all() ->
-    call(mbulk(<<"FLUSHALL">>)).
 
 %%-----------------------------------------
 %% string commands 
@@ -514,7 +472,7 @@ lpushx(Key, Val) ->
 %% @doc Get a range of elements from a list
 -spec lrange(key(), int(), int()) -> [val()].
 list_range(Key, Start, End) ->
-    to_list(call(mbulk(<<"LRANGE">>, Key, ?N2S(Start), ?N2S(End)))).
+    may_null_to_list(call(mbulk(<<"LRANGE">>, Key, ?N2S(Start), ?N2S(End)))).
 
 %% @doc Remove elements from a list
 %% N > 0, from head to tail
@@ -746,132 +704,222 @@ zunionstore(Dst, Keys) ->
 zunionstore(Dst, Keys, Weights, Aggregate) ->
     do_zset_store(<<"ZUNIONSTORE">>, Dst, Keys, Weights, Aggregate).
 
-%%------------------------------------------------------------------------------
+%%------------
+%% pub/sub
+%%------------
+
+%% @doc Listen for messages published to channels 
+%% matching the given patterns
+%% CbSub: called when received subscribe reply
+%% CbMsg: called when received msg
+-spec psubscribe(pattern() | [pattern()], 
+    psubscribe_fun(), pmessage_fun()) -> 'ok'.
+psubscribe(Pattern, CbSub, CbMsg) 
+    when is_function(CbSub, 2),
+    is_function(CbMsg, 3) ->
+    L = may_single_to_list(Pattern),
+    redis_client:psubscribe(Client, L, CbSub, CbMsg).
+
+%% @doc Listen for messages published to the given channels
+-spec subscribe(channel() | [channel()], 
+    subscribe_fun(), message_fun()) -> 'ok'.
+subscribe(Channel, CbSub, CbMsg)
+    when is_function(CbSub, 2),
+    is_function(CbMsg, 2) ->
+    L = may_single_to_list(Channel),
+    redis_client:subscribe(Client, L, CbSub, CbMsg).
+
+%% @doc publish a message to channel
+-spec publish(channel(), str()) -> uint().
+publish(Channel, Msg) ->
+    call(mbulk(<<"PUBLISH">>, Channel, Msg)).
+
+%% @doc unsubscribe to all channels
+%% CbUnSub: called when received unsubscribe reply
+-spec punsubscribe(punsubscribe_fun()) -> 'ok'.
+punsubscribe(CbUnSub) ->
+    punsubscribe([], CbUnSub).
+-spec punsubscribe(str() | [str()], punsubscribe_fun()) -> 'ok'.
+punsubscribe(Pattern, CbUnSub) ->
+    when is_function(CbUnSub, 2) ->
+    L = may_single_to_list(Pattern),
+    redis_client:punsubscribe(Client, L, CbUnSub).
+
+%% @doc unsubscribe to all channels
+-spec unsubscribe(unsubscribe_fun()) -> 'ok'.
+unsubscribe(CbUnSub) ->
+    unsubscribe([], CbUnSub).
+-spec unsubscribe(channel() | [channel()], unsubscribe_fun()) -> 'ok'.
+unsubscribe(Channel, CbUnSub)
+    when is_function(CbUnSub, 2) ->
+    L = may_single_to_list(Pattern),
+    redis_client:unsubscribe(Client, L, CbUnSub).
+
+%%---------------------------
 %% transaction commands 
-%%------------------------------------------------------------------------------
+%%---------------------------
+
+%% @doc Mark the start of a transaction block
+-spec multi() -> 'ok'.
+multi() ->
+    call(mbulk(<<"MULTI">>)).
+
+%% @doc Execute all commands issued after MULTI
+-spec exec() -> any().
+exec() ->
+    call(mbulk(<<"EXEC">>)).
+
+%% @doc Discard all commands issued after MULTI
+-spec discard() -> 'ok'.
+discard() ->
+    call(mbulk(<<"DISCARD">>)).
 
 %% @doc watch some keys, before the EXEC command in transaction, if the watched keys
 %% were changed, the transaction failed, otherwise the transaction success
--spec watch([key()]) -> 'ok'.
-watch(Keys) ->
-    call(mbulk_list([<<"WATCH">> | Keys])).
+-spec watch(key() | [key()]) -> 'ok'.
+watch(Key) ->
+    L = may_single_to_list(Key)
+    call(mbulk_list([<<"WATCH">> | L])).
 
-%% @doc flush all the watched keys
+%% @doc Forget about all watched keys
 -spec unwatch() -> 'ok'.
 unwatch() ->
     call(mbulk(<<"UNWATCH">>)).
 
-%% @doc transaction begin
--spec trans_begin() -> 'ok' | error().
-trans_begin() ->
-    call(mbulk(<<"MULTI">>)).
 
-%% @doc transaction commit
--spec trans_commit() -> [any()].
-trans_commit() ->
-    call(mbulk(<<"EXEC">>)).
+%%----------------------
+%% connections
+%%----------------------
 
-%% @doc transaction discard
--spec trans_abort() ->
-    'ok'.
-trans_abort() ->
-    call(mbulk(<<"DISCARD">>)).
+%% @doc simple password authentication
+-spec auth(iolist()) -> 'ok' | error().
+auth(Pass) ->
+    call(mbulk(<<"AUTH">>, Pass)).
 
-%% @doc subscribe to channels
--spec subscribe([channel()], fun(), fun()) ->
-    'ok'.
-subscribe(Channels, CbSub, CbMsg) ->
-    redis_client:subscribe(Client, Channels, CbSub, CbMsg).
+%% @doc Echo the given string
+-spec echo(str()) -> str().
+echo(Msg) ->
+    call(mbulk(<<"ECHO">>, Msg)).
 
-%% @doc unsubscribe to all channels
--spec unsubscribe(fun()) ->
-    'ok'.
-unsubscribe(CbUnSub) ->
-    redis_client:unsubscribe(Client, CbUnSub).
+%% @doc ping the server
+-spec ping() -> status_code().
+ping() ->
+    call(mbulk(<<"PING">>)).
 
-%% @doc unsubscribe some channels
--spec unsubscribe([channel()], fun()) ->
-    'ok'.
-unsubscribe(Channels, CbUnSub) ->
-    redis_client:unsubscribe(Client, Channels, CbUnSub).
+%% @doc close the connection
+-spec quit() -> 'ok'.
+quit() ->
+    redis_client:quit(Client).
 
-%% @doc publish message to channel
--spec publish(channel(), str()) ->
-    count().
-publish(Channel, Msg) ->
-    call(mbulk(<<"PUBLISH">>, Channel, Msg)).
+%% @doc Change the selected database for the current connection
+-spec select(uint()) -> status_code().
+select(Index) ->
+    R = call(mbulk(<<"SELECT">>, ?N2S(Index))),
+    case R of
+        ok ->
+            redis_client:set_selected_db(Client, Index);
+        Other ->
+            Other
+    end.
 
+%%---------
+%% server
+%%---------
 
-%%------------------------------------------------------------------------------
-%% persistence commands 
-%%------------------------------------------------------------------------------
+%% @doc Asynchronously rewrite the append-only file
+-spec bgrewriteaof() -> 'ok'.
+bgrewriteaof() ->
+    call(mbulk(<<"BGREWRITEAOF">>)).
+
+%% @doc Asynchronously save the dataset to disk
+-spec bgsave() -> status_code().
+bgsave() ->
+    call(mbulk(<<"BGSAVE">>)).
+
+%% @doc Get the value of a configuration parameter
+-spec config_get(pattern()) -> [{str(), str()}].
+config_get(Pattern) ->
+    L = call(mbulk(<<"CONFIG">>, <<"GET">>, Pattern)),
+    list_to_kv_tuple(L).
+
+%% @doc Set a configuration parameter to the given value
+-spec config_set(str(), str()) -> status_code().
+config_set(Par, L) when Par =:= "save"; Par =:= <<"save">> ->
+    Str = to_save_str(L),
+    call(mbulk(<<"CONFIG">>, <<"SET">>, <<"save">>, Str));
+config_set(Par, Val) when is_list(Par) ->
+    ValStr =
+    if 
+        is_integer(Val) ->
+            ?N2S(Val);
+        is_list(Val) ->
+            Val
+    end,
+    call(mbulk(<<"CONFIG">>, <<"SET">>, Par, ValStr)).
+
+%% @doc Reset the stats returned by INFO
+-spec config_resetstat() -> 'ok'.
+config_resetstat() ->
+    call(mbulk(<<"CONFIG">>, <<"RESETSTAT">>)).
+
+%% @doc Return the number of keys in the selected database
+-spec dbsize() -> count().
+dbsize() ->
+    call(mbulk(<<"DBSIZE">>)).
+
+%% @doc Get debugging information about a key
+-spec debug_object(key()) -> val().
+debug_object(Key) ->
+    call(mbulk(<<"DEBUG">>, <<"OBJECT">>, Key)).
+
+%% @doc Make the server crash
+-spec debug_segfault() -> no_return().
+debug_segfault() ->
+    call(mbulk(<<"DEBUG">>, <<"SEGFAULT">>)).
+
+%% @doc Remove all keys from all databases
+-spec flushall() -> status_code().
+flushall() ->
+    call(mbulk(<<"FLUSHALL">>)).
+
+%% @doc Remove all keys from the current database
+-spec flushdb() -> status_code().
+flushdb() ->
+    call(mbulk(<<"FLUSHDB">>)).
+
+%% @doc return the info about the server
+-spec info() -> [{str(), val()}].
+info() ->
+    L = call(mbulk(<<"INFO">>)),
+    list_to_kv_tuple(L).
+
+%% @doc Get the UNIX time stamp of the last successful save to disk
+-spec lastsave() -> timestamp().
+lastsave() ->
+    call(mbulk(<<"LASTSAVE">>)).
 
 %% @doc synchronously save the DB on disk
 -spec save() -> 'ok' | error().
 save() ->
     call(mbulk(<<"SAVE">>)).
 
-%% @doc save the DB in background
--spec bg_save() -> 'ok' | error().
-bg_save() ->
-    call(mbulk(<<"BGSAVE">>)).
-
-%% @doc return the UNIX time that the last DB save excuted with success
--spec lastsave_time() -> timestamp().
-lastsave_time() ->
-    call(mbulk(<<"LASTSAVE">>)).
-
 %% @doc synchronously save the DB on disk, then shutdown the server
--spec shutdown() -> 'ok' | error().
+-spec shutdown() -> status_code().
 shutdown() ->
     redis_client:shutdown(Client).
 
-%% @doc rewrite the append only log in background
--spec bg_rewrite_aof() -> 'ok' | error().
-bg_rewrite_aof() ->
-    call(mbulk(<<"BGREWRITEAOF">>)).
-
-%%------------------------------------------------------------------------------
-%% remote server control commands 
-%%------------------------------------------------------------------------------
-%% @doc return the info about the server
--spec info() -> [{atom(), value()}].
-info() ->
-    call(mbulk(<<"INFO">>)).
-
-%% @doc make the redis from slave into a master instance 
--spec slave_off() -> 'ok'.
-slave_off() ->
-    call(mbulk(<<"SLAVEOF">>, <<"no">>, <<"one">>)).
-
-%% @doc change the slave's master to Host:Port (the old data will be discraded)
-%% FIXME it seems in redis-2.0 the salveof command always return ok
--spec slave_of(iolist(), integer()) -> 'ok'.
+%% @doc Make the server a slave of another instance, 
+%% or promote it as master
+-spec slave_of(iolist(), integer()) -> status_code().
 slave_of(Host, Port) when 
     (is_list(Host) orelse is_binary(Host)),
     is_integer(Port) ->
     call(mbulk(<<"SLAVEOF">>, Host, ?N2S(Port))).
 
-%% @doc retrieve the config info in running redis server
--spec config_get(pattern()) -> 
-    [{binary(), any()}].
-config_get(Pattern) ->
-    KVList = call(mbulk(<<"CONFIG">>, <<"GET">>, Pattern)),
-    list_to_kv_tuple(KVList).
-
-%% @doc alter the config info in running redis server
--spec config_set(string(), any()) -> 'ok'.
-config_set("save", L) ->
-    Str = entry_to_str(L),
-    call(mbulk(<<"CONFIG">>, <<"SET">>, <<"save">>, Str));
-config_set(Par, Val) when is_list(Par) ->
-    ValStr =
-    if is_integer(Val) ->
-            ?N2S(Val);
-        is_list(Val) ->
-            Val
-    end,
-    call(mbulk(<<"CONFIG">>, <<"SET">>, Par, ValStr)).
+%% @doc make the redis from slave into a master instance 
+-spec slave_off() -> 'ok'.
+slave_off() ->
+    call(mbulk(<<"SLAVEOF">>, <<"no">>, <<"one">>)).
 
 
 %% @doc other unknown commands
@@ -984,9 +1032,9 @@ aggregate_to_str(max) -> <<"MAX">>.
 
 %% convert [{200, 2}, {300, 4}] to 
 %% "200 2 300 4"
-entry_to_str(L) ->
+to_save_str(L) ->
     L2 = 
-    [ lists:concat([Time, " ", Change])
+    [lists:concat([Time, " ", Change])
         || {Time, Change} <- L, is_integer(Time), is_integer(Change)],
     string:join(L2, " ").
 
@@ -1010,8 +1058,12 @@ score_to_str(S) when is_float(S) ->
     erlang:float_to_list(S).
 
 %%------------------
-%% handle the reply
+%% data convert
 %%------------------
+
+%% convert to list
+may_single_to_list([H|_] = V) when is_list(H); is_binary(H) -> V;
+may_single_to_list(V) -> [V].
 
 %% convert to boolean if the value is possible, otherwise return the value self
 int_may_bool(0) -> false;
@@ -1046,8 +1098,8 @@ do_fun(Fun, E) ->
     Fun(E).
 
 %% convert reply to list
-to_list(null) -> [];
-to_list(L) when is_list(L) -> L.
+may_null_to_list(null) -> [];
+may_null_to_list(L) when is_list(L) -> L.
 
 %% string => score
 str_to_score(B) when is_binary(B) ->
