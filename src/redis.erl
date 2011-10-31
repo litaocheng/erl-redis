@@ -3,14 +3,17 @@
 %%% @copyright erl-redis 2010
 %%%
 %%% @author litaocheng@gmail.com
-%%% @doc the interface for redis, all the commands are same with redis.io/commands,
-%%%     except for all the function are lowercase of the redis commands
-%%%     (this module is parameterized module: Client - the context related client process)
-%%%     ref:http://redis.io/commands
+%%% @doc the interface for redis, all the commands are same with 
+%%%     http://redis.io/commands, except for all the function are 
+%%%     lowercase of the redis commands
+%%%
+%%%     this module is parameterized module: 
+%%%         Client - the context related client process)
+%%%         Pipeline - if in pipeline model
 %%% @end
 %%%
 %%%----------------------------------------------------------------------
--module(redis, [Client]).
+-module(redis, [Client, Pipeline]).
 -author('litaocheng@gmail.com').
 -vsn('0.1').
 -include("redis_internal.hrl").
@@ -59,6 +62,9 @@
 -export([multi/0, exec/0, discard/0,
         watch/1, unwatch/0]).
 
+%% pipelining
+-export([pipelining/1]).
+
 %% connection
 -export([auth/1, echo/1, ping/0, quit/0]).
 
@@ -66,7 +72,7 @@
 -export([config_get/1, config_set/2, config_resetstat/0,
         dbsize/0, debug_object/1, debug_segfault/0,
         flushall/0, flushdb/0, info/0, lastsave/0, slave_of/2, 
-        slave_off/0, slowlog/2, sync/0]).
+        slave_off/0]).
 
 %% other unknown commands
 -export([command/1]).
@@ -111,51 +117,38 @@ db() ->
 
 %% @doc delete keys
 %% return the number of keys that were removed
--spec del(Keys :: [key()] | key()) -> 
-    integer().
+-spec del(Keys :: [key()] | key()) -> integer().
 del([H|_] = Key) when is_list(H); is_binary(H) ->
     call(mbulk_list([<<"DEL">> | Key]));
 del(Key) when is_binary(Key) ->
     call(mbulk(<<"DEL">>, Key)).
 
 %% @doc test if the key exists
-%% O(1)
--spec exists(Key :: key()) -> 
-    boolean().
+-spec exists(key()) -> boolean().
 exists(Key) ->
-    R = call(mbulk(<<"EXISTS">>, Key)),
-    int_may_bool(R).
+    call(mbulk(<<"EXISTS">>, Key), fun int_may_bool/1),
 
 %% @doc set a timeout on the specified key, after the Time the Key will
 %% automatically deleted by server.
-%% O(1)
--spec expire(Key :: key(), Time :: second()) -> 
-    boolean().
+-spec expire(Key :: key(), Time :: second()) -> boolean().
 expire(Key, Time) ->
-    R = call(mbulk(<<"EXPIRE">>, Key, ?N2S(Time))),
-    int_may_bool(R).
+    call(mbulk(<<"EXPIRE">>, Key, ?N2S(Time)), fun int_may_bool/1).
 
 %% @doc set a unix timestamp on the specified key, the Key will
 %% automatically deleted by server at the TimeStamp in the future.
-%% O(1)
--spec expire_at(Key :: key(), TimeStamp :: timestamp()) -> 
-    boolean().
+-spec expire_at(Key :: key(), TimeStamp :: timestamp()) -> boolean().
 expire_at(Key, TimeStamp) ->
-    R = call(mbulk(<<"EXPIREAT">>, Key, ?N2S(TimeStamp))),
-    int_may_bool(R).
+    call(mbulk(<<"EXPIREAT">>, Key, ?N2S(TimeStamp)), fun int_may_bool/1).
 
 %% @doc return the keys list matching a given pattern
-%% O(n)
--spec keys(Pattern :: str()) -> 
-    [key()].
+-spec keys(Pattern :: str()) -> [key()].
 keys(Pattern) ->
-    may_null_to_list(call(mbulk(<<"KEYS">>, Pattern))).
+    call(mbulk(<<"KEYS">>, Pattern)), fun may_null_to_list/1).
 
 %% @doc move a key to anthor db
--spec move(key(), uint()) ->
-    boolean().
+-spec move(key(), uint()) -> boolean().
 move(Key, DBIndex) ->
-    int_may_bool(call(mbulk(<<"MOVE">>, Key, ?N2S(DBIndex)))).
+    call(mbulk(<<"MOVE">>, Key, ?N2S(DBIndex))), fun int_may_bool/1).
 
 %% @doc Inspect the internals of Redis objects
 %% SubCmd: REFCOUNT, ENCODING, IDLETIME
@@ -166,7 +159,7 @@ object(SubCmd, Args) ->
 %% @doc Remove the expiration from a key
 -spec persist(key()) -> boolean().
 persist(Key) ->
-    int_may_bool(call(mbulk("PERSIST", Key))).
+    call(mbulk("PERSIST", Key)), fun int_may_bool/1).
 
 %% @doc return a random key from the keyspace
 -spec randomkey() -> key() | null().
@@ -181,7 +174,7 @@ rename(OldKey, NewKey) ->
 %% @doc  rename a key, only if the new key does not exist
 -spec renamenx(Key :: key(), NewKey :: key()) -> boolean().
 renmaenx(Key, NewKey) ->
-    int_may_bool(call(mbulk(<<"RENAMENX">>, Key, NewKey))).
+    call(mbulk(<<"RENAMENX">>, Key, NewKey)), fun int_may_bool/1).
 
 %% @doc sort the list in a list, set or sorted set
 -spec sort(Key :: key(), SortOpt :: redis_sort()) -> list().
@@ -213,11 +206,10 @@ sort(Key, SortOpt) ->
     AscPart = ?IF(is_empty_str(Asc), [], [<<"DESC">>]),
     AlphaPart = ?IF(is_empty_str(Alpha), [], [<<"ALPHA">>]),
     StorePart = ?IF(is_empty_str(Store), [], [<<"STORE">>, Store]),
-    L = 
-    call(mbulk_list([<<"SORT">>, Key | 
+    call(
+        mbulk_list([<<"SORT">>, Key | 
         lists:append([ByPart, LimitPart, GetPart, AscPart, AlphaPart, StorePart])
-    ])),
-    list_to_n_tuple(L, FieldCount).
+    ]), fun(R) -> list_to_n_tuple(R, FieldCount) end).
 
 %% @doc get the time to live for a key
 -spec ttl(Key :: key()) -> integer().
@@ -235,9 +227,9 @@ eval(Script, NumKeys, Keys, Args) ->
     call(mbulk_list([<<"EVAL">>, Script, ?N2S(NumKeys) | Keys ++ Args])).
 
 
-%%-----------------------------------------
-%% string commands 
-%%-----------------------------------------
+%%------------
+%% strings
+%%------------
 
 %% @doc append a value to the string stored at key,
 %%      return the new string length
@@ -302,7 +294,7 @@ mset(KeyVals) ->
 -spec msetnx(KeyVals :: [{key(), str()}]) -> boolean().
 msetnx(KeyVals) ->
     L = [<<"MSETNX">> | lists:append([[K, V] || {K, V} <- KeyVals])],
-    int_may_bool(call(mbulk_list(L))).
+    call(mbulk_list(L)), fun int_may_bool/1).
 
 %% @doc set the string value of the key 
 -spec set(key(), str()) -> 'ok'.
@@ -338,9 +330,9 @@ setrange(Key, Start, Val) ->
 strlen(Key) ->
     call(mbulk(<<"STRLEN">>, Key)).
 
-%%--------------------------------
+%%------------
 %% hashes
-%%--------------------------------
+%%------------
 
 %% @doc delete one or more hash fields
 -spec hdel(key(), [key()]) -> boolean().
@@ -352,7 +344,7 @@ hdel(Key, Field) ->
 %% @doc determine if a hash field exists
 -spec hexists(key(), key()) -> boolean().
 hexists(Key, Field) ->
-    int_may_bool(call(mbulk(<<"HEXISTS">>, Key, Field))).
+    call(mbulk(<<"HEXISTS">>, Key, Field)), fun int_may_bool/1).
 
 %% @doc get the value of the a hash field
 -spec hget(key(), key()) -> val().
@@ -362,7 +354,7 @@ hget(Key, Field) ->
 %% @doc get all the fields and values in a hash
 -spec hgetall(key()) -> [{key(), str()}].
 hgetall(Key) ->
-    list_to_kv_tuple(call(mbulk(<<"HGETALL">>, Key))).
+    call(mbulk(<<"HGETALL">>, Key)), fun list_to_kv_tuple/1).
 
 %% @doc increment the integer value of a hash filed by
 %% given numer
@@ -394,13 +386,13 @@ hmset(Key, FieldVals) ->
 %% @doc set the string value of a hash filed with 
 -spec hset(key(), key(), str()) -> boolean().
 hset(Key, Field, Val) ->
-    int_my_bool(call(mbulk(<<"HSET">>, Key, Field, Val))).
+    call(mbulk(<<"HSET">>, Key, Field, Val)), fun int_my_bool/1).
 
 %% @doc Set the value of a hash field, only if the field 
 %% does not exist
 -spec hsetnx(key(), key(), str()) -> boolean().
 hsetnx(Key, Field, Val) ->
-    int_may_bool(call(mbulk(<<"HSETNX">>, Key, Field, Val))).
+    call(mbulk(<<"HSETNX">>, Key, Field, Val)), fun int_may_bool/1).
 
 %% @doc return all the values in hash
 -spec hvals(key()) -> [val()].
@@ -472,7 +464,7 @@ lpushx(Key, Val) ->
 %% @doc Get a range of elements from a list
 -spec lrange(key(), int(), int()) -> [val()].
 list_range(Key, Start, End) ->
-    may_null_to_list(call(mbulk(<<"LRANGE">>, Key, ?N2S(Start), ?N2S(End)))).
+    call(mbulk(<<"LRANGE">>, Key, ?N2S(Start), ?N2S(End))), fun may_null_to_list/1).
 
 %% @doc Remove elements from a list
 %% N > 0, from head to tail
@@ -556,7 +548,7 @@ sinterstore(Dst, Keys) ->
 %% @doc Determine if a given value is a member of a set
 -spec sismember(key(), str()) -> boolean().
 sismember(Key, Mem) ->
-    int_may_bool(call(mbulk(<<"SISMEMBER">>, Key, Mem))).
+    call(mbulk(<<"SISMEMBER">>, Key, Mem)), fun int_may_bool/1).
 
 %% @doc get all the members in the set
 -spec smembers(key()) -> boolean().
@@ -566,7 +558,7 @@ smembers(Key) ->
 %% @doc Move a member from one set to another
 -spec smove(key(), key(), str()) -> boolean().
 smove(Src, Dst, Mem) ->
-    int_may_bool(call(mbulk(<<"SMOVE">>, Src, Dst, Mem))).
+    call(mbulk(<<"SMOVE">>, Src, Dst, Mem)), fun int_may_bool/1).
 
 %% @doc Remove and return a random member from a set
 -spec spop(key()) -> val().
@@ -622,7 +614,7 @@ zcount(Key, Min, Max) ->
 %% @doc Increment the score of a member in a sorted set
 -spec zincrby(key(), int(), key()) -> score().
 zincrby(Key, N, Mem) ->
-    str_to_score(call(mbulk(<<"ZINCRBY">>, Key, ?N2S(N), Mem))).
+    call(mbulk(<<"ZINCRBY">>, Key, ?N2S(N), Mem)), fun str_to_score/1).
 
 %% @doc Intersect multiple sorted sets and store 
 %% the resulting sorted set in a new key
@@ -704,14 +696,15 @@ zunionstore(Dst, Keys) ->
 zunionstore(Dst, Keys, Weights, Aggregate) ->
     do_zset_store(<<"ZUNIONSTORE">>, Dst, Keys, Weights, Aggregate).
 
-%%------------
-%% pub/sub
-%%------------
+%%----------------
+%% pub/sub 
+%%----------------
 
 %% @doc Listen for messages published to channels 
 %% matching the given patterns
 %% CbSub: called when received subscribe reply
 %% CbMsg: called when received msg
+%% (can't pipeline)
 -spec psubscribe(pattern() | [pattern()], 
     psubscribe_fun(), pmessage_fun()) -> 'ok'.
 psubscribe(Pattern, CbSub, CbMsg) 
@@ -721,6 +714,7 @@ psubscribe(Pattern, CbSub, CbMsg)
     redis_client:psubscribe(Client, L, CbSub, CbMsg).
 
 %% @doc Listen for messages published to the given channels
+%% (can't pipeline)
 -spec subscribe(channel() | [channel()], 
     subscribe_fun(), message_fun()) -> 'ok'.
 subscribe(Channel, CbSub, CbMsg)
@@ -736,6 +730,7 @@ publish(Channel, Msg) ->
 
 %% @doc unsubscribe to all channels
 %% CbUnSub: called when received unsubscribe reply
+%% (can't pipeline)
 -spec punsubscribe(punsubscribe_fun()) -> 'ok'.
 punsubscribe(CbUnSub) ->
     punsubscribe([], CbUnSub).
@@ -746,6 +741,7 @@ punsubscribe(Pattern, CbUnSub) ->
     redis_client:punsubscribe(Client, L, CbUnSub).
 
 %% @doc unsubscribe to all channels
+%% (can't pipeline)
 -spec unsubscribe(unsubscribe_fun()) -> 'ok'.
 unsubscribe(CbUnSub) ->
     unsubscribe([], CbUnSub).
@@ -786,6 +782,38 @@ watch(Key) ->
 unwatch() ->
     call(mbulk(<<"UNWATCH">>)).
 
+%%------------
+%% pipeline
+%%------------
+
+%% @doc pipeline commands
+%% e.g.
+%% F = 
+%% fun() ->
+%%  exists("key1"),
+%%  set("key1", "val1"),
+%%  get("key1")
+%% end,
+%% pipeline(F).
+pipeline(Fun) when is_list(Fun, 0) ->
+    case Pipeline of
+        true ->
+            Fun(),
+            Cmds = get_pipeline_cmd(),
+            FunList = get_pipeline_fun(),
+            ResultList = redis_client:commands(Cmds),
+            lists:mapfoldl(
+            fun(R, [F|T]) ->
+                case F of
+                    ?NONE ->
+                        {R, T};
+                    _ ->
+                        {F(R), T}
+                end
+            end, FunList, ResultList);
+        false ->
+            throw(in_normal_model)
+    end.
 
 %%----------------------
 %% connections
@@ -807,11 +835,13 @@ ping() ->
     call(mbulk(<<"PING">>)).
 
 %% @doc close the connection
+%% (can't pipeline)
 -spec quit() -> 'ok'.
 quit() ->
     redis_client:quit(Client).
 
 %% @doc Change the selected database for the current connection
+%% (can't pipeline)
 -spec select(uint()) -> status_code().
 select(Index) ->
     R = call(mbulk(<<"SELECT">>, ?N2S(Index))),
@@ -839,8 +869,7 @@ bgsave() ->
 %% @doc Get the value of a configuration parameter
 -spec config_get(pattern()) -> [{str(), str()}].
 config_get(Pattern) ->
-    L = call(mbulk(<<"CONFIG">>, <<"GET">>, Pattern)),
-    list_to_kv_tuple(L).
+    call(mbulk(<<"CONFIG">>, <<"GET">>, Pattern), fun list_to_kv_tuple/1).
 
 %% @doc Set a configuration parameter to the given value
 -spec config_set(str(), str()) -> status_code().
@@ -890,8 +919,7 @@ flushdb() ->
 %% @doc return the info about the server
 -spec info() -> [{str(), val()}].
 info() ->
-    L = call(mbulk(<<"INFO">>)),
-    list_to_kv_tuple(L).
+    call(mbulk(<<"INFO">>), fun list_to_kv_tuple/1).
 
 %% @doc Get the UNIX time stamp of the last successful save to disk
 -spec lastsave() -> timestamp().
@@ -904,6 +932,7 @@ save() ->
     call(mbulk(<<"SAVE">>)).
 
 %% @doc synchronously save the DB on disk, then shutdown the server
+%% (can't pipeline)
 -spec shutdown() -> status_code().
 shutdown() ->
     redis_client:shutdown(Client).
@@ -921,7 +950,6 @@ slave_of(Host, Port) when
 slave_off() ->
     call(mbulk(<<"SLAVEOF">>, <<"no">>, <<"one">>)).
 
-
 %% @doc other unknown commands
 command(Args) ->
     call(mbulk_list(Args)).
@@ -936,16 +964,16 @@ command(Args) ->
 do_zrange(Cmd, Key, Start, End, false) ->
     call(mbulk(Cmd, Key, ?N2S(Start), ?N2S(End)));
 do_zrange(Cmd, Key, Start, End, true) ->
-    L = call(mbulk_list([Cmd, Key, ?N2S(Start), ?N2S(End), <<"WITHSCORES">>])),
-    list_to_kv_tuple(L, fun(S) -> str_to_score(S) end).
+    call(mbulk_list([Cmd, Key, ?N2S(Start), ?N2S(End), <<"WITHSCORES">>]),
+        fun(R) -> list_to_kv_tuple(R, fun(S) -> str_to_score(S) end)).
 
 %% get sorted set in range, by score
 do_zrange_by_score(Cmd, Key, Min, Max, false) ->
     call(mbulk(Cmd, Key, score_to_str(Min), score_to_str(Max)));
 do_zrange_by_score(Cmd, Key, Min, Max, true) ->
-    L = call(mbulk_list([Cmd, Key, 
-        score_to_str(Min), score_to_str(Max), <<"WITHSCORES">>])),
-    list_to_kv_tuple(L, fun(S) -> str_to_score(S) end).
+    call(mbulk_list([Cmd, Key, 
+        score_to_str(Min), score_to_str(Max), <<"WITHSCORES">>]),
+        fun(R) -> list_to_kv_tuple(R, fun(S) -> str_to_score(S) end)).
 
 -spec zset_range_score(Key :: key(), Min :: score(), Max :: score(), 
     Start :: index(), Count :: integer(), WithScore :: boolean()) ->
@@ -961,20 +989,16 @@ zset_range_score(Key, Min, Max, Start, Count, WithScore) ->
                 ?N2S(Count)
                 ]));
         true ->
-            L = call(mbulk_list([<<"ZRANGEBYSCORE">>, Key, 
+            call(mbulk_list([<<"ZRANGEBYSCORE">>, Key, 
                 score_to_str(Min), 
                 score_to_str(Max),
                 <<"LIMIT">>,
                 ?N2S(Start),
                 ?N2S(Count),
                 <<"WITHSCORES">>
-                ])),
-            list_to_kv_tuple(L, fun(S) -> str_to_score(S) end)
+                ]),
+            fun(R) -> list_to_kv_tuple(R, fun(S) -> str_to_score(S) end) end)
     end.
-
-
-
-
 
 do_zset_store(Cmd, Dst, Keys, Weights, Aggregate) when
         Aggregate =:= sum;
@@ -985,17 +1009,19 @@ do_zset_store(Cmd, Dst, Keys, Weights, Aggregate) when
     ++ [<<"AGGREGATE">>, aggregate_to_str(Aggregate)],
     call(mbulk_list([Cmd, Dst, length(Keys) | L])).
 
+%% call the command
 call(Cmd) ->
-    redis_client:command(Client, Cmd).
-
-call(Cmd, Timeout) ->
-    redis_client:command(Client, Cmd, Timeout).
-
-%% the timeout value
-timeout_val(infinity) ->
-    "0";
-timeout_val(T) when is_integer(T), T >= 0 ->
-    ?N2S(T).
+    call(Cmd, ?NONE).
+call(Cmd, Fun) ->
+    case Pipeline of
+        false ->
+            % normal model
+            R = redis_client:command(Client, Cmd),
+            ?IF(Fun =/= ?NONE, Fun(R), R);
+        true ->
+            % pipeline model
+            add_pipeline_cmd(Cmd, Fun)
+    end.
 
 %% get the application vsn
 %% return 'undefined' | string().
@@ -1008,6 +1034,51 @@ get_app_vsn() ->
             {ok, Vsn} = application:get_key(App, vsn),
             Vsn
     end.
+
+%%--------------------
+%% pipeline internal
+%%--------------------
+-define(PIPELINE_CMD_KEY, '$pipeline_cmd_key').
+-define(PIPELINE_FUN_KEY, '$pipeline_fun_key').
+
+add_pipeline_cmd(Cmd, Fun) ->
+    proc_list_add(?PIPELINE_CMD_KEY, Cmd),
+    proc_list_add(?PIPELINE_FUN_KEY, Fun).
+
+get_pipeline_cmd() ->
+    proc_list_get(?PIPELINE_CMD_KEY).
+
+get_pipeline_fun() ->
+    proc_list_get(?PIPELINE_FUN_KEY).
+
+proc_list_add(Key, Val) ->
+    case erlang:get(Key) of
+        undefined ->
+            erlang:put(Key, [Val]);
+        L ->
+            erlang:put(Key, [Val | L])
+    end.
+
+proc_list_get(Key) ->
+    case erlang:get(Key) of
+        undefined ->
+            [];
+        L ->
+            lists:reverse(L)
+    end.
+
+proc_list_clear(Key) ->
+    erlang:erase(Key).
+
+%%------------------
+%% data convert
+%%------------------
+
+%% the timeout value
+timeout_val(infinity) ->
+    "0";
+timeout_val(T) when is_integer(T), T >= 0 ->
+    ?N2S(T).
 
 %% convert list to n elments tuple list
 list_to_n_tuple([], _N) ->
@@ -1025,6 +1096,7 @@ list_to_n_tuple(L, N) when N > 1 ->
         end,
     {1, [], []}, L),
     lists:reverse(AccL).
+
 
 aggregate_to_str(sum) -> <<"SUM">>;
 aggregate_to_str(min) -> <<"MIN">>;
@@ -1056,10 +1128,6 @@ score_to_str(S) when is_integer(S) ->
     ?N2S(S);
 score_to_str(S) when is_float(S) ->
     erlang:float_to_list(S).
-
-%%------------------
-%% data convert
-%%------------------
 
 %% convert to list
 may_single_to_list([H|_] = V) when is_list(H); is_binary(H) -> V;

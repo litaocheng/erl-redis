@@ -97,6 +97,8 @@
 -type inet_port() :: 0..65535.
 -type inet_server() :: {inet_host(), inet_port()}.
 
+-type redis_handler() :: {redis, _, _}.
+
 -type trans_handler() :: atom().
 
 

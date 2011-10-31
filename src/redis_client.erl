@@ -15,7 +15,7 @@
 
 -export([start/3, start/4, start_link/3, start_link/4]).
 -export([stop/1]).
--export([handler/1]).
+-export([handler/1, pipeline/1]).
 
 -export([get_server/1, get_sock/1]).
 -export([set_selected_db/2, get_selected_db/1]).
@@ -89,9 +89,17 @@ stop({redis, Client}) ->
 stop(Client) ->
     gen_server:call(Client, stop).
 
--spec handler(client()) -> tuple().
+%% @doc get the redis normal handler
+-spec handler(client()) -> redis_handler().
 handler(Client) ->
-    redis:new(Client).
+    redis:new(Client, false).
+
+%% @doc get the redis pipeline handler
+-spec pipeline(client() | redis_handler()) -> redis_handler().
+pipeline({redis, Client, _} = Handler) ->
+    redis:new(Client, true);
+pipeline(Client) ->
+    redis:new(Client, true).
 
 %% @doc get the server info
 -spec get_server(Client :: pid()) -> inet_server().
@@ -124,6 +132,10 @@ command(Client, Data) ->
 -spec command(pid(), iolist(), timeout()) -> any().
 command(Client, Data, Timeout) ->
     gen_server:call(Client, {command, Data, Timeout}, Timeout).
+
+%% @doc pipelining commands
+pipelining(Client, Fun) ->
+    ok = gen_server:call(Client, 
 
 %% @doc subscribe the the patterns, called by redis:psubscribe
 psubscribe(Client, Patterns, CbSub, CbMsg) ->
