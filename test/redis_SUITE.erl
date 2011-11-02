@@ -21,7 +21,7 @@ init_per_suite(Config) ->
     code:add_path("../ebin"),
     {ok, Pid} = redis_client:start(localhost, 6379, ""),
     Redis = redis_client:handler(Pid),
-    ok = Redis:flush_all(),
+    ok = Redis:flushall(),
     io:format("Redis is ~p~n", [Redis]),
     [{redis_client, Redis} | Config].
 
@@ -41,17 +41,14 @@ end_per_testcase(Name, Config) ->
 
 all() -> 
     [
-        test_generic,
         test_string,
-        test_list,
-        test_set,
-        test_zset,
-        % Redis 1.3.4
-        test_hash,
-        test_sort,
-        % Redis 1.3.4
-        test_trans,
-        test_persistence,
+        %test_list,
+        %test_set,
+        %test_zset,
+        %test_hash,
+        %test_sort,
+        %test_trans,
+        %test_persistence,
         test_dummy
     ].
 
@@ -61,82 +58,51 @@ all() ->
 test_dummy(_Config) ->
     ok.
 
-%% test generic commands
-test_generic(Config) ->
+%% test keys commands
+test_string(Config) ->
     Redis = ?config(redis_client, Config),
 
-    false = Redis:exists("key1"),
-    false = Redis:delete("Key2"),
-    non_neg_int(?PF(Redis:multi_delete(["Key3", "key4", "key5", "key6"]))),
-    atom(?PF(Redis:type("key1"))),
-    [] = ?PF(Redis:keys("key*")),
-    ?PF(Redis:random_key()),
-    catch ?PF(Redis:rename("key1", "key2")),
-    catch ?PF(Redis:rename_not_exists("key1", "key2")),
-    ?PF(Redis:dbsize()),
+    ?PF(2 = Redis:append("k1", "10")),
+    9 = Redis:decr("k1"),
+    7 = Redis:decrby("k1", 2),
+    <<"7">> = Redis:get("k1"),
+    8 = Redis:incr("k1"),
+    10 = Redis:incrby("k1", 2),
 
-    false = Redis:expire("key333", 100000),
-    false = Redis:expire_at("key333", 1289138070),
-    -1 = Redis:ttl("key333"),
-    ok = Redis:set("key444", "val444"),
-    true = Redis:expire("key444", 100),
-    int(Redis:ttl("key444")),
-    true = Redis:persist("key444"), 
-    int(?PF(Redis:ttl("key444"))),
+    ok = Redis:set("k1", "hello world"),
+    <<"world">> = Redis:getrange("k1", 6, -1),
+    <<"hello world">> = Redis:getrange("k1", 0, -1),
+    <<"d">> = Redis:getrange("k1", -1, -1),
+    <<"d">> = Redis:getrange("k1", 10, -1),
+    11 = Redis:setrange("k1", 6, "home"),
+    13 = Redis:setrange("k1", 6, "home!!!"),
+    <<"hello home!!!">> = Redis:get("k1"),
+    ok = Redis:set("k1", "hello world"),
 
-    ?PF(Redis:ttl("key333")),
-    catch bool(?PF(Redis:move("key333", 1))),
-    ok = ?PF(Redis:select(1)),
-    catch ?PF(Redis:move("key333", 0)),
-    ok = ?PF(Redis:select(0)),
+    <<"hello world">> = Redis:getset("k1", "v1"),
+    <<"v1">> = Redis:get(<<"k1">>),
+    <<"v1">> = Redis:get(["k", $1]),
 
-    % append
-    3 = ?PF(Redis:append("key_append", "one")),
-    6 = ?PF(Redis:append("key_append", "two")),
+    ok = Redis:mset([{"k1", "v1"}, {"k2", "v2"}]),
+    [<<"v1">>, <<"v2">>] = Redis:mget(["k1", "k2"]),
+    false = Redis:msetnx([{"k1", "v1"}, {"k3", "v3"}]),
 
-    % substr
-    null = ?PF(Redis:substr("key_substr", 0, -1)),
-    Redis:set("key_substr", "This is a string"),
-    <<"This">> = ?PF(Redis:substr("key_substr", 0, 3)),
-    <<"ing">> = ?PF(Redis:substr("key_substr", -3, -1)),
-    <<"ing">> = ?PF(Redis:substr("key_substr", -3, -1)),
-    <<"This is a string">> = ?PF(Redis:substr("key_substr", 0, -1)),
-    <<" string">> = ?PF(Redis:substr("key_substr", 9, 100000)),
+    false = Redis:setnx("k1", "v1"),
+    ?PF(2 = Redis:strlen("k1")),
+    Redis:setex("k11", "v11", 10),
+
+    0 = Redis:setbit("key2", 1, 1),
+    1 = Redis:getbit("key2", 1),
 
     ok = ?PF(Redis:flush_db()),
     ok = ?PF(Redis:flush_all()),
 
     ok.
 
-test_string(Config) -> 
-    Redis = ?config(redis_client, Config),
-
-    ok = ?PF(Redis:set("key1", "hello")),
-    ok = ?PF(Redis:set("key2", <<"world">>)),
-    ok = ?PF(Redis:set("key2-expire", <<"world">>, 1000)),
-    <<"hello">> = ?PF(Redis:get("key1")),
-    KeyNow = lists:concat(["key", now_sec()]),
-    null = ?PF(Redis:get(KeyNow)),
-    null = ?PF(Redis:getset(KeyNow, "yes")),
-    <<"hello">> = ?PF(Redis:get("key1")),
-    <<"hello">> = ?PF(Redis:getset("key1", "hi")),
-    <<"world">> = ?PF(Redis:get(<<"key2">>)),
-    [<<"hi">>, <<"world">>, null] = ?PF(Redis:multi_get(["key1", <<"key2">>, <<"key_not_exists">>])),
-    bool(?PF(Redis:set_not_exists("key4", "val4"))),
-    catch ?PF(Redis:multi_set([{"key1", "val1"}, {"key2", "val2"}, {"key22", "val22"}])),
-    catch ?PF(Redis:multi_set_not_exists([{"key1", "val1"}, {"key2", "val2"}, {"key22", "val22"}])),
-    ok = ?PF(Redis:set("key_num_1", "100")),
-    101 = ?PF(Redis:incr("key_num_1")),
-    106 = ?PF(Redis:incr("key_num_1", 5)),
-    105 = ?PF(Redis:decr("key_num_1")),
-    90 = ?PF(Redis:decr("key_num_1", 15)),
-    ?PF(Redis:decr("key_num_1", 100)),
-    ok.
-
 test_list(Config) -> 
     Redis = ?config(redis_client, Config),
     1 = ?PF(Redis:list_push_tail("mylist", "e1")),
-    {error, _} = ?PF(Redis:list_push_tail("key1", "e1")),
+    {error, _} = ?PF(Redis:list_push_tail("k1", "e1")),
     2 = ?PF(Redis:list_push_head("mylist", "e2")),
     int(?PF(Redis:list_len("mylist"))),
     [_|_] = ?PF(Redis:list_range("mylist", 0, -1)),

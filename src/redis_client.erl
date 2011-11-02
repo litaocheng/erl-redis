@@ -304,7 +304,7 @@ call(Client, Req) ->
 
 %% create pubsub table
 do_create_table() ->
-    ets:new(dummy, [ets, private, named_table, {keypos, 1},
+    ets:new(dummy, [set, private, named_table, {keypos, 1},
             {read_concurrency, true}]).
 
 to_name(Host, Port, First) ->

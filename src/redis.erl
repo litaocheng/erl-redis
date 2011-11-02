@@ -256,7 +256,7 @@ get(Key) ->
 %% stored at key
 -spec getbit(key(), uint()) -> integer().
 getbit(Key, Offset) ->
-    call(mbulk(<<"GITBIT">>, Key, Offset)).
+    call(mbulk(<<"GETBIT">>, Key, Offset)).
 
 %% @doc return a substring of the string stored at a key
 -spec getrange(key(), int(), int()) -> str().
@@ -308,8 +308,7 @@ setbit(Key, Offset, Val) ->
     call(mbulk(<<"SETBIT">>, Key, ?N2S(Offset), Val)).
 
 %% @doc set the string value of the key with expired time
--spec setex(key(), str(), second()) ->
-    'ok' | status_code().
+-spec setex(key(), str(), second()) -> status_code().
 setex(Key, Val, Expire) ->
     call(mbulk(<<"SETEX">>, Key, ?N2S(Expire), Val)).
 
@@ -317,7 +316,7 @@ setex(Key, Val, Expire) ->
 %% does not exist
 -spec setnx(key(), str()) -> boolean().
 setnx(Key, Val) ->
-    call(mbulk(<<"SETNX">>, Key, Val)).
+    call(mbulk(<<"SETNX">>, Key, Val), fun int_may_bool/1).
 
 %% @doc overwrite part of the string at key
 %% return the new string length
