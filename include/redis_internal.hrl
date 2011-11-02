@@ -21,6 +21,18 @@
 -define(IF(C, T, F), (case (C) of true -> (T); false -> (F) end)).
 -endif.
 
+%% assert(1 =:= 1)
+-define(ASSERT(EXP),
+    case (EXP) of
+        true ->
+            ok;
+        false ->
+            error(??EXP)
+    end).
+
+
+-define(NONE, none).
+
 %% some convert macros
 -define(B2S(B), binary_to_list(B)).
 -define(S2B(S), list_to_binary(S)).

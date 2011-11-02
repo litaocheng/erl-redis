@@ -27,7 +27,7 @@
 
 %% strings
 -export([append/2, decr/1, decrby/2, get/1, getbit/2, getrange/3, getset/2, 
-        incr/1, incrby/2, mget/1, mset/2, msetnx/2, set/2,
+        incr/1, incrby/2, mget/1, mset/1, msetnx/1, set/2,
         setbit/3, setex/3, setnx/2, setrange/3, strlen/1]).
 
 %% hashes
@@ -35,43 +35,43 @@
         hkeys/1, hlen/1, hmget/2, hmset/2, hset/3, hsetnx/3, hvals/1]).
 
 %% lists
--export([blpop/2, brpop/2, drpoplpush/3, lindex/2, 
-        linsert/3, llen/1, lpop/1, lpush/2, lpushx/2,
+-export([blpop/2, brpop/2, brpoplpush/3, lindex/2, 
+        linsert/4, llen/1, lpop/1, lpush/2, lpushx/2,
         lrange/3, lrem/3, lset/3, ltrim/3, rpop/1, rpoplpush/2,
         rpush/2, rpushx/2]).
 
 %% sets
--export([sadd/2, scard/1, sdiff/1, sdiffstore/2, sinter/1,
-        sinterstore/2, sismember/2, smemebers/1, smove/3,
+-export([sadd/2, scard/1, sdiff/2, sdiffstore/3, sinter/1,
+        sinterstore/2, sismember/2, smembers/1, smove/3,
         spop/1, srandmember/1, srem/2, sunion/1, sunionstore/2]).
 
 %% sorted sets
--export([zdd/2, zcard/1, zcount/3, zincrby/3, 
+-export([zadd/2, zcard/1, zcount/3, zincrby/3, 
         zinterstore/2, zinterstore/3, zinterstore/4,
         zrange/4, zrangebyscore/4, zrank/2, zrem/2,
         zremrangebyrank/3, zremrangebyscore/3, zrevrange/4,
-        zrevrangebyscore/4, zrevrank/2, zscore/2, zunionstore/4]).
+        zrevrangebyscore/4, zrevrank/2, zscore/2, zunionstore/2, zunionstore/4]).
 
 %% pub/sub
--export([psubscribe/1, subscribe/1, 
+-export([psubscribe/3, subscribe/3, 
         publish/2, 
-        punsubscribe/0, punsubscribe/1, 
-        unsubscribe/0, unsubscribe/1]).
+        punsubscribe/1, punsubscribe/2, 
+        unsubscribe/1, unsubscribe/2]).
 
 %% transactions
 -export([multi/0, exec/0, discard/0,
         watch/1, unwatch/0]).
 
-%% pipelining
--export([pipelining/1]).
+%% pipeline
+-export([pipeline/1]).
 
 %% connection
--export([auth/1, echo/1, ping/0, quit/0]).
+-export([auth/1, echo/1, ping/0, quit/0, select/1]).
 
 %% server 
--export([config_get/1, config_set/2, config_resetstat/0,
+-export([bgrewriteaof/0, bgsave/0, config_get/1, config_set/2, config_resetstat/0,
         dbsize/0, debug_object/1, debug_segfault/0,
-        flushall/0, flushdb/0, info/0, lastsave/0, slave_of/2, 
+        flushall/0, flushdb/0, info/0, lastsave/0, save/0, shutdown/0, slave_of/2, 
         slave_off/0]).
 
 %% other unknown commands
@@ -79,7 +79,7 @@
 
 -compile(inline).
 -compile({inline_size, 30}).
--import(redis_proto, [mbulk/1, mbulk/2, mbulk/3, mbulk/4, mbulk_list/1]).
+-import(redis_proto, [mbulk/1, mbulk/2, mbulk/3, mbulk/4, mbulk/5, mbulk_list/1]).
 
 -define(MULTI_REPLY(Ret),
     case BadServers of
@@ -126,29 +126,29 @@ del(Key) when is_binary(Key) ->
 %% @doc test if the key exists
 -spec exists(key()) -> boolean().
 exists(Key) ->
-    call(mbulk(<<"EXISTS">>, Key), fun int_may_bool/1),
+    call(mbulk(<<"EXISTS">>, Key), fun int_may_bool/1).
 
 %% @doc set a timeout on the specified key, after the Time the Key will
 %% automatically deleted by server.
--spec expire(Key :: key(), Time :: second()) -> boolean().
+-spec expire(key(), second()) -> boolean().
 expire(Key, Time) ->
     call(mbulk(<<"EXPIRE">>, Key, ?N2S(Time)), fun int_may_bool/1).
 
 %% @doc set a unix timestamp on the specified key, the Key will
 %% automatically deleted by server at the TimeStamp in the future.
--spec expire_at(Key :: key(), TimeStamp :: timestamp()) -> boolean().
-expire_at(Key, TimeStamp) ->
+-spec expireat(Key :: key(), TimeStamp :: timestamp()) -> boolean().
+expireat(Key, TimeStamp) ->
     call(mbulk(<<"EXPIREAT">>, Key, ?N2S(TimeStamp)), fun int_may_bool/1).
 
 %% @doc return the keys list matching a given pattern
 -spec keys(Pattern :: str()) -> [key()].
 keys(Pattern) ->
-    call(mbulk(<<"KEYS">>, Pattern)), fun may_null_to_list/1).
+    call(mbulk(<<"KEYS">>, Pattern), fun may_null_to_list/1).
 
 %% @doc move a key to anthor db
 -spec move(key(), uint()) -> boolean().
 move(Key, DBIndex) ->
-    call(mbulk(<<"MOVE">>, Key, ?N2S(DBIndex))), fun int_may_bool/1).
+    call(mbulk(<<"MOVE">>, Key, ?N2S(DBIndex)), fun int_may_bool/1).
 
 %% @doc Inspect the internals of Redis objects
 %% SubCmd: REFCOUNT, ENCODING, IDLETIME
@@ -159,7 +159,7 @@ object(SubCmd, Args) ->
 %% @doc Remove the expiration from a key
 -spec persist(key()) -> boolean().
 persist(Key) ->
-    call(mbulk("PERSIST", Key)), fun int_may_bool/1).
+    call(mbulk("PERSIST", Key), fun int_may_bool/1).
 
 %% @doc return a random key from the keyspace
 -spec randomkey() -> key() | null().
@@ -173,8 +173,8 @@ rename(OldKey, NewKey) ->
 
 %% @doc  rename a key, only if the new key does not exist
 -spec renamenx(Key :: key(), NewKey :: key()) -> boolean().
-renmaenx(Key, NewKey) ->
-    call(mbulk(<<"RENAMENX">>, Key, NewKey)), fun int_may_bool/1).
+renamenx(Key, NewKey) ->
+    call(mbulk(<<"RENAMENX">>, Key, NewKey), fun int_may_bool/1).
 
 %% @doc sort the list in a list, set or sorted set
 -spec sort(Key :: key(), SortOpt :: redis_sort()) -> list().
@@ -243,7 +243,7 @@ decr(Key) ->
     call(mbulk(<<"DECR">>, Key)).
 
 %% @doc decrease the integer value of key by given number
--spec decr(key(), integer()) -> integer().
+-spec decrby(key(), integer()) -> integer().
 decrby(Key, N) ->
     call(mbulk(<<"DECRBY">>, Key, ?N2S(N))).
 
@@ -294,7 +294,7 @@ mset(KeyVals) ->
 -spec msetnx(KeyVals :: [{key(), str()}]) -> boolean().
 msetnx(KeyVals) ->
     L = [<<"MSETNX">> | lists:append([[K, V] || {K, V} <- KeyVals])],
-    call(mbulk_list(L)), fun int_may_bool/1).
+    call(mbulk_list(L), fun int_may_bool/1).
 
 %% @doc set the string value of the key 
 -spec set(key(), str()) -> 'ok'.
@@ -337,14 +337,14 @@ strlen(Key) ->
 %% @doc delete one or more hash fields
 -spec hdel(key(), [key()]) -> boolean().
 hdel(Key, [H|_] = Field) when is_list(H); is_binary(H) ->
-    call(mbulk_list([<<"HDEL">> | Field]));
+    call(mbulk_list([<<"HDEL">>, Key | Field]));
 hdel(Key, Field) ->
-    call(mbulk(<<"HDEL">>, Field)).
+    call(mbulk(<<"HDEL">>, Key, Field)).
 
 %% @doc determine if a hash field exists
 -spec hexists(key(), key()) -> boolean().
 hexists(Key, Field) ->
-    call(mbulk(<<"HEXISTS">>, Key, Field)), fun int_may_bool/1).
+    call(mbulk(<<"HEXISTS">>, Key, Field), fun int_may_bool/1).
 
 %% @doc get the value of the a hash field
 -spec hget(key(), key()) -> val().
@@ -354,7 +354,7 @@ hget(Key, Field) ->
 %% @doc get all the fields and values in a hash
 -spec hgetall(key()) -> [{key(), str()}].
 hgetall(Key) ->
-    call(mbulk(<<"HGETALL">>, Key)), fun list_to_kv_tuple/1).
+    call(mbulk(<<"HGETALL">>, Key), fun list_to_kv_tuple/1).
 
 %% @doc increment the integer value of a hash filed by
 %% given numer
@@ -386,13 +386,13 @@ hmset(Key, FieldVals) ->
 %% @doc set the string value of a hash filed with 
 -spec hset(key(), key(), str()) -> boolean().
 hset(Key, Field, Val) ->
-    call(mbulk(<<"HSET">>, Key, Field, Val)), fun int_my_bool/1).
+    call(mbulk(<<"HSET">>, Key, Field, Val), fun int_may_bool/1).
 
 %% @doc Set the value of a hash field, only if the field 
 %% does not exist
 -spec hsetnx(key(), key(), str()) -> boolean().
 hsetnx(Key, Field, Val) ->
-    call(mbulk(<<"HSETNX">>, Key, Field, Val)), fun int_may_bool/1).
+    call(mbulk(<<"HSETNX">>, Key, Field, Val), fun int_may_bool/1).
 
 %% @doc return all the values in hash
 -spec hvals(key()) -> [val()].
@@ -421,7 +421,7 @@ brpop(Keys, Timeout) ->
 %% and return it; or block until one is available
 -spec brpoplpush(key(), key(), timeout()) -> val().
 brpoplpush(Src, Dst, Timeout) ->
-    call(mbulk(<<"BRPOPLPUSH">>, Src, Dst, timeout_str(Timeout))). 
+    call(mbulk(<<"BRPOPLPUSH">>, Src, Dst, timeout_val(Timeout))). 
 
 %% @doc Get an element from a list by its index
 -spec lindex(key(), uint()) -> val().
@@ -437,7 +437,7 @@ linsert(Key, Pos, Pivot, Val) when Pos =:= 'before'; Pos =:= 'after' ->
         before -> <<"BEFORE">>;
         _ -> <<"AFTER">>
     end,
-    call(mbulk(<<"LINSERT">>, PosStr, Pivot, Val)).
+    call(mbulk(<<"LINSERT">>, Key, PosStr, Pivot, Val)).
 
 %% @doc get the length of the list
 -spec llen(key()) -> uint().
@@ -463,8 +463,8 @@ lpushx(Key, Val) ->
 
 %% @doc Get a range of elements from a list
 -spec lrange(key(), int(), int()) -> [val()].
-list_range(Key, Start, End) ->
-    call(mbulk(<<"LRANGE">>, Key, ?N2S(Start), ?N2S(End))), fun may_null_to_list/1).
+lrange(Key, Start, End) ->
+    call(mbulk(<<"LRANGE">>, Key, ?N2S(Start), ?N2S(End)), fun may_null_to_list/1).
 
 %% @doc Remove elements from a list
 %% N > 0, from head to tail
@@ -548,7 +548,7 @@ sinterstore(Dst, Keys) ->
 %% @doc Determine if a given value is a member of a set
 -spec sismember(key(), str()) -> boolean().
 sismember(Key, Mem) ->
-    call(mbulk(<<"SISMEMBER">>, Key, Mem)), fun int_may_bool/1).
+    call(mbulk(<<"SISMEMBER">>, Key, Mem), fun int_may_bool/1).
 
 %% @doc get all the members in the set
 -spec smembers(key()) -> boolean().
@@ -558,7 +558,7 @@ smembers(Key) ->
 %% @doc Move a member from one set to another
 -spec smove(key(), key(), str()) -> boolean().
 smove(Src, Dst, Mem) ->
-    call(mbulk(<<"SMOVE">>, Src, Dst, Mem)), fun int_may_bool/1).
+    call(mbulk(<<"SMOVE">>, Src, Dst, Mem), fun int_may_bool/1).
 
 %% @doc Remove and return a random member from a set
 -spec spop(key()) -> val().
@@ -571,10 +571,10 @@ srandmember(Key) ->
     call(mbulk(<<"SRANDMEMBER">>, Key)).
 
 %% @doc Remove one or more members from a set
--spec srm(key(), key() | [key()]) -> boolean().
-srm(Key, [H|_] = Mem) when is_list(H); is_binary(H) ->
+-spec srem(key(), key() | [key()]) -> boolean().
+srem(Key, [H|_] = Mem) when is_list(H); is_binary(H) ->
     mbulk_list([<<"SREM">>, Key | Mem]);
-srm(Key, Mem) ->
+srem(Key, Mem) ->
     call(mbulk(<<"SREM">>, Key, Mem)).
 
 %% @doc  Add multiple sets
@@ -609,20 +609,20 @@ zcard(Key) ->
 zcount(Key, Min, Max) ->
     MinStr = score_to_str(Min),
     MaxStr = score_to_str(Max),
-    call(mbulk(<<"ZCOUNT">>, Key, MinStr, MaxStr))).
+    call(mbulk(<<"ZCOUNT">>, Key, MinStr, MaxStr)).
 
 %% @doc Increment the score of a member in a sorted set
 -spec zincrby(key(), int(), key()) -> score().
 zincrby(Key, N, Mem) ->
-    call(mbulk(<<"ZINCRBY">>, Key, ?N2S(N), Mem)), fun str_to_score/1).
+    call(mbulk(<<"ZINCRBY">>, Key, ?N2S(N), Mem), fun str_to_score/1).
 
 %% @doc Intersect multiple sorted sets and store 
 %% the resulting sorted set in a new key
 zinterstore(Dst, Keys) ->
-    zinterstore(Dst, Keys, [], sum);
+    zinterstore(Dst, Keys, [], sum).
 zinterstore(Dst, Keys, Weights) ->
     ?ASSERT(length(Keys) =:= length(Weights)),
-    zinterstore(Dst, Keys, Weights, sum);
+    zinterstore(Dst, Keys, Weights, sum).
 zinterstore(Dst, Keys, Weights, Aggregate) ->
     do_zset_store(<<"ZINTERSTORE">>, Dst, Keys, Weights, Aggregate).
 
@@ -636,7 +636,7 @@ zrange(Key, Start, End, WithScore) ->
 -spec zrangebyscore(key(), score(), score(), boolean()) -> 
     [val()] | [{key(), val()}].
 zrangebyscore(Key, Min, Max, WithScore) ->
-    do_zrange_by_score(<<"ZRANGEBYSCORE">>, Key, Start, End, WithScore).
+    do_zrange_by_score(<<"ZRANGEBYSCORE">>, Key, Min, Max, WithScore).
 
 %% @doc Determine the index of a member in a sorted set
 -spec zrank(key(), key()) -> int() | null().
@@ -646,7 +646,7 @@ zrank(Key, Mem) ->
 %% @doc Remove one or more members from a sorted set
 -spec zrem(key(), key() | [key()]) -> uint().
 zrem(Key, [H|_] = Mem) when is_list(H); is_binary(H) ->
-    call(mbulk_list(<<"ZREM">>, Key | Mem));
+    call(mbulk_list([<<"ZREM">>, Key | Mem]));
 zrem(Key, Mem) ->
     call(mbulk(<<"ZREM">>, Key, Mem)).
 
@@ -673,12 +673,12 @@ zrevrange(Key, Start, End, WithScore) ->
 -spec zrevrangebyscore(key(), score(), score(), boolean()) -> 
     [val()] | [{key(), val()}].
 zrevrangebyscore(Key, Min, Max, WithScore) ->
-    do_zrange_by_score(<<"ZREVRANGEBYSCORE">>, Key, Start, End, WithScore).
+    do_zrange_by_score(<<"ZREVRANGEBYSCORE">>, Key, Min, Max, WithScore).
 
 %% @doc Determine the index of a member in a sorted set, 
 %% with scores ordered from high to low
--spec zrevrange(key(), key()) -> int() | null().
-zrevrange(Key, Mem) ->
+-spec zrevrank(key(), key()) -> int() | null().
+zrevrank(Key, Mem) ->
     call(mbulk(<<"ZREVRANK">>, Key, Mem)).
 
 %% @doc Get the score associated with the given member 
@@ -735,7 +735,7 @@ publish(Channel, Msg) ->
 punsubscribe(CbUnSub) ->
     punsubscribe([], CbUnSub).
 -spec punsubscribe(str() | [str()], punsubscribe_fun()) -> 'ok'.
-punsubscribe(Pattern, CbUnSub) ->
+punsubscribe(Pattern, CbUnSub)
     when is_function(CbUnSub, 2) ->
     L = may_single_to_list(Pattern),
     redis_client:punsubscribe(Client, L, CbUnSub).
@@ -748,7 +748,7 @@ unsubscribe(CbUnSub) ->
 -spec unsubscribe(channel() | [channel()], unsubscribe_fun()) -> 'ok'.
 unsubscribe(Channel, CbUnSub)
     when is_function(CbUnSub, 2) ->
-    L = may_single_to_list(Pattern),
+    L = may_single_to_list(Channel),
     redis_client:unsubscribe(Client, L, CbUnSub).
 
 %%---------------------------
@@ -774,7 +774,7 @@ discard() ->
 %% were changed, the transaction failed, otherwise the transaction success
 -spec watch(key() | [key()]) -> 'ok'.
 watch(Key) ->
-    L = may_single_to_list(Key)
+    L = may_single_to_list(Key),
     call(mbulk_list([<<"WATCH">> | L])).
 
 %% @doc Forget about all watched keys
@@ -795,13 +795,14 @@ unwatch() ->
 %%  get("key1")
 %% end,
 %% pipeline(F).
-pipeline(Fun) when is_list(Fun, 0) ->
+pipeline(Fun) when is_function(Fun, 0) ->
     case Pipeline of
         true ->
             Fun(),
             Cmds = get_pipeline_cmd(),
             FunList = get_pipeline_fun(),
             ResultList = redis_client:commands(Cmds),
+            clear_pipeline_ctx(),
             lists:mapfoldl(
             fun(R, [F|T]) ->
                 case F of
@@ -812,7 +813,7 @@ pipeline(Fun) when is_list(Fun, 0) ->
                 end
             end, FunList, ResultList);
         false ->
-            throw(in_normal_model)
+            throw(badmodel)
     end.
 
 %%----------------------
@@ -965,7 +966,7 @@ do_zrange(Cmd, Key, Start, End, false) ->
     call(mbulk(Cmd, Key, ?N2S(Start), ?N2S(End)));
 do_zrange(Cmd, Key, Start, End, true) ->
     call(mbulk_list([Cmd, Key, ?N2S(Start), ?N2S(End), <<"WITHSCORES">>]),
-        fun(R) -> list_to_kv_tuple(R, fun(S) -> str_to_score(S) end)).
+        fun(R) -> list_to_kv_tuple(R, fun(S) -> str_to_score(S) end) end).
 
 %% get sorted set in range, by score
 do_zrange_by_score(Cmd, Key, Min, Max, false) ->
@@ -973,32 +974,7 @@ do_zrange_by_score(Cmd, Key, Min, Max, false) ->
 do_zrange_by_score(Cmd, Key, Min, Max, true) ->
     call(mbulk_list([Cmd, Key, 
         score_to_str(Min), score_to_str(Max), <<"WITHSCORES">>]),
-        fun(R) -> list_to_kv_tuple(R, fun(S) -> str_to_score(S) end)).
-
--spec zset_range_score(Key :: key(), Min :: score(), Max :: score(), 
-    Start :: index(), Count :: integer(), WithScore :: boolean()) ->
-        'null' | [value() | {key(), value()}].
-zset_range_score(Key, Min, Max, Start, Count, WithScore) ->
-    case WithScore of
-        false ->
-            call(mbulk_list([<<"ZRANGEBYSCORE">>, Key, 
-                score_to_str(Min), 
-                score_to_str(Max),
-                <<"LIMIT">>,
-                ?N2S(Start),
-                ?N2S(Count)
-                ]));
-        true ->
-            call(mbulk_list([<<"ZRANGEBYSCORE">>, Key, 
-                score_to_str(Min), 
-                score_to_str(Max),
-                <<"LIMIT">>,
-                ?N2S(Start),
-                ?N2S(Count),
-                <<"WITHSCORES">>
-                ]),
-            fun(R) -> list_to_kv_tuple(R, fun(S) -> str_to_score(S) end) end)
-    end.
+        fun(R) -> list_to_kv_tuple(R, fun(S) -> str_to_score(S) end) end).
 
 do_zset_store(Cmd, Dst, Keys, Weights, Aggregate) when
         Aggregate =:= sum;
@@ -1051,6 +1027,11 @@ get_pipeline_cmd() ->
 get_pipeline_fun() ->
     proc_list_get(?PIPELINE_FUN_KEY).
 
+clear_pipeline_ctx() ->
+    erlang:erase(?PIPELINE_CMD_KEY),
+    erlang:erase(?PIPELINE_FUN_KEY),
+    ok.
+
 proc_list_add(Key, Val) ->
     case erlang:get(Key) of
         undefined ->
@@ -1066,9 +1047,6 @@ proc_list_get(Key) ->
         L ->
             lists:reverse(L)
     end.
-
-proc_list_clear(Key) ->
-    erlang:erase(Key).
 
 %%------------------
 %% data convert
@@ -1117,9 +1095,9 @@ is_empty_str(_) -> false.
 
 %% score convert string for zset
 score_to_str('-inf') ->
-    <<"-inf">>.
+    <<"-inf">>;
 score_to_str('+inf') ->
-    <<"+inf">>.
+    <<"+inf">>;
 score_to_str({open, S}) ->
     ?N2S(S); 
 score_to_str({closed, S}) ->

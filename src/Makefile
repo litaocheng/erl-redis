@@ -12,7 +12,7 @@ INCLUDE_DIRS :=../include ./
 INCLUDE_FILES := $(wildcard ../include/*.hrl) $(wildcard ./*.hrl) 
 
 EBIN_DIRS := $(wildcard ../libs/*/ebin)
-ERLC_FLAGS := -W $(addprefix -I , $(INCLUDE_DIRS)) $(addprefix -pa , $(EBIN_DIRS))
+ERLC_FLAGS := +warnings_as_errors -W $(addprefix -I , $(INCLUDE_DIRS)) $(addprefix -pa , $(EBIN_DIRS))
 
 ifdef TEST
   ERLC_FLAGS += +debug_info -DTEST 
