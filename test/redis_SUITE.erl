@@ -42,10 +42,10 @@ end_per_testcase(Name, Config) ->
 all() -> 
     [
         test_string,
-        %test_list,
+        test_hash,
+        test_list,
         %test_set,
         %test_zset,
-        %test_hash,
         %test_sort,
         %test_trans,
         %test_persistence,
@@ -94,29 +94,111 @@ test_string(Config) ->
     0 = Redis:setbit("key2", 1, 1),
     1 = Redis:getbit("key2", 1),
 
-    ok = ?PF(Redis:flush_db()),
-    ok = ?PF(Redis:flush_all()),
+    ok = ?PF(Redis:flushdb()),
+    ok.
 
+test_hash(Config) -> 
+    Redis = ?config(redis_client, Config),
+
+    0 = Redis:hdel("k1", "f1"),
+    false = Redis:hexists("k1", "f1"),
+    true = Redis:hset("k1", "f1", "v1"),
+    true = Redis:hexists("k1", "f1"),
+    <<"v1">> = Redis:hget("k1", "f1"),
+    1 = Redis:hdel("k1", "f1"),
+    0 = Redis:hdel("k1", ["f1", "f2"]),
+
+    1 = Redis:hincrby("k1", "f1", 1),
+    -1 = Redis:hincrby("k1", "f1", -2),
+    1 = Redis:hincrby("k1", "f1", 2),
+
+    <<"1">> = Redis:hget("k1", <<"f1">>),
+    true = Redis:hset("k1", "f2", "v2"),
+    [{<<"f1">>, <<"1">>}, {<<"f2">>, <<"v2">>}] = 
+        Redis:hgetall("k1"),
+    [<<"f1">>, <<"f2">>] = Redis:hkeys("k1"),
+    [<<"1">>, <<"v2">>] = Redis:hvals("k1"),
+    2 = Redis:hlen("k1"),
+    0 = Redis:hlen("knotexists"),
+
+    [<<"1">>, <<"v2">>] = Redis:hmget("k1", [<<"f1">>, "f2"]),
+    ok = Redis:hmset("k1", [{"f3", "v3"}, {"f4", "v4"}]),
+    [<<"v4">>] = Redis:hmget("k1", ["f4"]),
+
+    true = Redis:hsetnx("k1", "f5", "v5"),
+    false = Redis:hsetnx("k1", "f1", "v1"),
+
+    2 = Redis:hdel("k1", ["f1", "f2"]),
+
+    ok = Redis:flushdb(),
     ok.
 
 test_list(Config) -> 
     Redis = ?config(redis_client, Config),
-    1 = ?PF(Redis:list_push_tail("mylist", "e1")),
-    {error, _} = ?PF(Redis:list_push_tail("k1", "e1")),
-    2 = ?PF(Redis:list_push_head("mylist", "e2")),
-    int(?PF(Redis:list_len("mylist"))),
-    [_|_] = ?PF(Redis:list_range("mylist", 0, -1)),
-    [_] = ?PF(Redis:list_range("mylist", 0, 0)),
-    ?PF(Redis:list_trim("mylist", 0, 1)),
-    ?PF(Redis:list_range("mylist", 0, -1)),
-    ?PF(Redis:list_index("mylist", 0)),
-    ?PF(Redis:list_set("mylist", 0, "first_v2")),
-    ?PF(Redis:list_set("mylist", 2, "sencod_v2")),
-    ?PF(Redis:list_rm("mylist", "sencod_v2")),
-    ?PF(Redis:list_rm_from_head("mylist", 1, "sencod_v2")),
-    ?PF(Redis:list_rm_from_tail("mylist", 1, "sencod_v2")),
-    ?PF(Redis:list_pop_head("mylist")),
-    ?PF(Redis:list_pop_tail("mylist")),
+   
+    null = Redis:lindex("k1", 1), 
+    0 = Redis:linsert("k1", before, "e1", "e2"),
+    0 = Redis:llen("k1"),
+    [] = Redis:lrange("k1", 0, -1),
+    1 = Redis:lpush("k1", "e1"),
+    2 = Redis:linsert("k1", before, "e1", "e0"),
+    [<<"e0">>, <<"e1">>] = Redis:lrange("k1", 0, -1),
+    <<"e0">> = Redis:lpop("k1"),
+    null = Redis:lpop("knotexist"),
+    2 = Redis:linsert("k1", 'after', "e1", "e2"),
+    [<<"e1">>, <<"e2">>] = Redis:lrange("k1", 0, -1),
+    [<<"e2">>] = Redis:lrange("k1", -1, -1),
+    2 = Redis:llen("k1"),
+
+    3 = Redis:lpush("k1", "e0"),
+    4 = Redis:linsert("k1", 'after', "e2", "e1"),
+    [<<"e0">>, <<"e1">>, <<"e2">>, <<"e1">>] = Redis:lrange("k1", 0, -1),
+
+    1 = Redis:lrem("k1", 0, "e2"),
+    0 = Redis:lrem("k1", 0, "enotexist"),
+    1 = Redis:lrem("k1", -1, "e0"),
+    [<<"e1">>, <<"e1">>] = Redis:lrange("k1", 0, -1),
+    3 = Redis:rpush("k1", "e2"),
+    <<"e2">> = Redis:rpop("k1"),
+    3 = Redis:rpush("k1", ["e0"]),
+    1 = Redis:lrem("k1", 1, "e0"),
+    4 = Redis:lpush("k1", ["e-1", "e-2"]),
+    ok = Redis:ltrim("k1", 2, -1),
+
+    [<<"e1">>, <<"e1">>] = Redis:lrange("k1", 0, -1),
+
+    2 = Redis:lrem("k1", 2, "e1"),
+    [] = Redis:lrange("k1", 0, -1),
+
+    0 = Redis:lpushx("k2", "e2"),
+    % k1 not exists
+    0 = Redis:lpushx("k1", "e0"),
+    0 = Redis:rpushx("k2", "e2"),
+
+    3 = Redis:rpush("k1", ["e0", "e1", "e2"]),
+    [<<"e0">>, <<"e1">>, <<"e2">>] = Redis:lrange("k1", 0, -1),
+    ok = Redis:lset("k1", 0, "enew0"),
+    ?PF({error, _} = Redis:lset("k1", 3, "enew2")),
+    
+    ok = Redis:ltrim("k1", 0, -1),
+    3 = Redis:llen("k1"),
+    ok = Redis:ltrim("k1", 0, 1),
+    2 = Redis:llen("k1"),
+
+    <<"e1">> = Redis:rpoplpush("k1", "dst"),
+    1 = Redis:llen("k1"),
+    1 = Redis:llen("dst"),
+    2 = Redis:rpushx("dst", "e2"),
+
+    [{<<"k1">>, <<"enew0">>}] = Redis:blpop(["k1", "k2"], 1),
+    [{<<"dst">>, <<"e2">>}] = Redis:brpop(["dst"], 1),
+    null = Redis:blpop(["knotexist"], 1),
+
+    null = Redis:brpoplpush("knotexist", "k333", 1),
+    ok = Redis:ltrim("k1", -1, 0),
+    0 = Redis:llen("k1"),
+    2 = Redis:push("k1", ["e1", "e2"]),
+    [{<<"k1">>, <<"e1">>}] = Redis:brpoplpush("k1", "dst", 1),
 
     ok.
 
@@ -176,44 +258,6 @@ test_zset(Config) ->
     1 = ?PF(Redis:zset_rm_by_score("myzset", 0, 1)),
     2 = ?PF(Redis:zset_len("myzset")),
     null = ?PF(Redis:zset_score("myzset", "f1")),
-    ok.
-
-test_hash(Config) -> 
-    Redis = ?config(redis_client, Config),
-    true = ?PF(Redis:hash_set("myhash", "f1", "v1")),
-    true = ?PF(Redis:hash_set_not_exists("myhash", "f11", "v11")),
-    false = ?PF(Redis:hash_set_not_exists("myhash", "f11", "v11")),
-
-    ok = ?PF(Redis:hash_multi_set("myhash", [{"f1", "v1"}, {"f2", "v2"}])),
-    <<"v1">> = ?PF(Redis:hash_get("myhash", "f1")),
-    null = ?PF(Redis:hash_get("myhash", "f_not_exist")),
-    [<<"v1">>, <<"v2">>] = ?PF(Redis:hash_multi_get("myhash", ["f1", "f2"])),
-    [<<"v1">>, <<"v2">>, null] = ?PF(Redis:hash_multi_get("myhash", ["f1", "f2", "f_not_exist"])),
-
-    % hash incr
-    {error, _} = ?PF(Redis:hash_incr("myhash", "f1", 5)),
-    5 = ?PF(Redis:hash_incr("myhash", "f_num", 5)),
-
-    true = ?PF(Redis:hash_del("myhash", "f1")),
-    Redis:hash_del("myhash", "f11"),
-    true = ?PF(Redis:hash_del("myhash", "f2")),
-    false = ?PF(Redis:hash_del("myhash", "f_not_exist")),
-    true = Redis:hash_del("myhash", "f_num"),
-
-    % hash exists
-    true = ?PF(Redis:hash_set("myhash", "f1", "v1")),
-    false = ?PF(Redis:hash_exists("myhash", "f_not_exist")),
-    true = ?PF(Redis:hash_exists("myhash", "f1")),
-    
-    % hash len
-    int(?PF(Redis:hash_len("myhash"))),
-
-    % hash keys/vals/all
-    true = Redis:hash_set(<<"myhash">>, "f2", <<"v2">>),
-    [<<"f1">>, <<"f2">>] = ?PF(Redis:hash_keys("myhash")),
-    [<<"v1">>, <<"v2">>] = ?PF(Redis:hash_vals("myhash")),
-    [{<<"f1">>, <<"v1">>}, {<<"f2">>, <<"v2">>}] = ?PF(Redis:hash_all("myhash")),
-
     ok.
 
 test_sort(Config) ->

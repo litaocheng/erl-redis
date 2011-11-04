@@ -334,7 +334,7 @@ strlen(Key) ->
 %%------------
 
 %% @doc delete one or more hash fields
--spec hdel(key(), [key()]) -> boolean().
+-spec hdel(key(), [key()]) -> uint().
 hdel(Key, [H|_] = Field) when is_list(H); is_binary(H) ->
     call(mbulk_list([<<"HDEL">>, Key | Field]));
 hdel(Key, Field) ->
@@ -404,10 +404,10 @@ hvals(Key) ->
 
 %% @doc Remove and get the first element in a list, or block
 %% until one is available
--spec blpop([key()], timeout()) -> val().
+-spec blpop([key()], timeout()) -> null() | [{str(), val()}].
 blpop(Keys, Timeout) ->
     L = mbulk_list([<<"BLPOP">> | Keys ++ [timeout_val(Timeout)]]),
-    call(L).
+    call(L, fun list_to_kv_tuple/1).
 
 %% @doc Remove and get the last element in a list, 
 %% or block until one is available

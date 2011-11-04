@@ -84,7 +84,7 @@ start_link(Host, Port, Passwd, Name) ->
     gen_server:start_link({local, Name}, ?MODULE, {{Host, Port}, Passwd}, []).
 
 -spec stop(client() | tuple()) -> 'ok'.
-stop({redis, Client}) ->
+stop({redis, Client, _}) ->
     call(Client, stop);
 stop(Client) ->
     call(Client, stop).
