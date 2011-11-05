@@ -63,7 +63,7 @@
 %% the redis supervisor name
 -define(CONN_SUP, redis_conn_sup).
 -define(CONN_TIMEOUT, 5000).
--define(COMMAND_TIMEOUT, 2000).  
+-define(COMMAND_TIMEOUT, 10000).  
 -define(CONN_POOL_DEF, 5).
 -define(CONN_POOL_MIN, 1).
 -define(CONN_POOL_MAX, 64).

@@ -403,18 +403,18 @@ hvals(Key) ->
 %%------------------------
 
 %% @doc Remove and get the first element in a list, or block
-%% until one is available
+%% until one is available (timeout unit is second)
 -spec blpop([key()], timeout()) -> null() | [{str(), val()}].
 blpop(Keys, Timeout) ->
-    L = mbulk_list([<<"BLPOP">> | Keys ++ [timeout_val(Timeout)]]),
-    call(L, fun list_to_kv_tuple/1).
+    call(mbulk_list([<<"BLPOP">> | Keys ++ [timeout_val(Timeout)]]), 
+        fun list_to_kv_tuple/1).
 
 %% @doc Remove and get the last element in a list, 
 %% or block until one is available
--spec brpop([key()], timeout()) ->
-    value().
+-spec brpop([key()], timeout()) -> null() | [{str(), val()}].
 brpop(Keys, Timeout) ->
-    call(mbulk_list([<<"BRPOP">> | (Keys ++ [timeout_val(Timeout)])]), Timeout).
+    call(mbulk_list([<<"BRPOP">> | Keys ++ [timeout_val(Timeout)]]),
+        fun list_to_kv_tuple/1).
 
 %% @doc Pop a value from a list, push it to another list 
 %% and return it; or block until one is available
@@ -525,7 +525,7 @@ scard(Key) ->
 %% @doc Subtract multiple sets
 -spec sdiff(key(), [key()]) -> [val()].
 sdiff(First, Keys) ->
-    call(mbulk_list([<<"SDIFF">>, First | Keys])).
+    call(mbulk_list([<<"SDIFF">>, First | Keys]), fun may_null_to_list/1).
 
 %% @doc Subtract multiple sets and store the resulting 
 %% set in a key
@@ -536,7 +536,7 @@ sdiffstore(Dst, First, Keys) ->
 %% @doc return the intersection between the sets
 -spec sinter([key()]) -> [val()].
 sinter(Keys) ->
-    call(mbulk_list([<<"SINTER">> | Keys])).
+    call(mbulk_list([<<"SINTER">> | Keys]), fun may_null_to_list/1).
 
 %% @doc Intersect multiple sets and store the 
 %% resulting set in a key
@@ -550,9 +550,9 @@ sismember(Key, Mem) ->
     call(mbulk(<<"SISMEMBER">>, Key, Mem), fun int_may_bool/1).
 
 %% @doc get all the members in the set
--spec smembers(key()) -> boolean().
+-spec smembers(key()) -> [val()].
 smembers(Key) ->
-    call(mbulk(<<"SMEMBERS">>, Key)).
+    call(mbulk(<<"SMEMBERS">>, Key), fun may_null_to_list/1).
 
 %% @doc Move a member from one set to another
 -spec smove(key(), key(), str()) -> boolean().
@@ -570,9 +570,9 @@ srandmember(Key) ->
     call(mbulk(<<"SRANDMEMBER">>, Key)).
 
 %% @doc Remove one or more members from a set
--spec srem(key(), key() | [key()]) -> boolean().
+-spec srem(key(), key() | [key()]) -> uint().
 srem(Key, [H|_] = Mem) when is_list(H); is_binary(H) ->
-    mbulk_list([<<"SREM">>, Key | Mem]);
+    call(mbulk_list([<<"SREM">>, Key | Mem]));
 srem(Key, Mem) ->
     call(mbulk(<<"SREM">>, Key, Mem)).
 

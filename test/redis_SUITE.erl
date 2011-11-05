@@ -44,7 +44,7 @@ all() ->
         test_string,
         test_hash,
         test_list,
-        %test_set,
+        test_set,
         %test_zset,
         %test_sort,
         %test_trans,
@@ -192,41 +192,70 @@ test_list(Config) ->
 
     [{<<"k1">>, <<"enew0">>}] = Redis:blpop(["k1", "k2"], 1),
     [{<<"dst">>, <<"e2">>}] = Redis:brpop(["dst"], 1),
-    null = Redis:blpop(["knotexist"], 1),
-
+    [] = Redis:blpop(["knotexist"], 1),
     null = Redis:brpoplpush("knotexist", "k333", 1),
     ok = Redis:ltrim("k1", -1, 0),
     0 = Redis:llen("k1"),
-    2 = Redis:push("k1", ["e1", "e2"]),
-    [{<<"k1">>, <<"e1">>}] = Redis:brpoplpush("k1", "dst", 1),
+    2 = Redis:lpush("k1", ["e1", "e2"]),
+    <<"e1">> = Redis:brpoplpush("k1", "dst", 1),
 
+    ok = Redis:flushdb(),
     ok.
 
 test_set(Config) -> 
     Redis = ?config(redis_client, Config),
 
-    true = ?PF(Redis:set_add("myset", "s1")),
-    false = ?PF(Redis:set_rm("myset", "s2")),
-    <<"s1">> = ?PF(Redis:set_pop("myset")),
-    true = ?PF(Redis:set_add("myset", "s2")),
-    1 = ?PF(Redis:set_len("myset")),
-    0 = ?PF(Redis:set_len("myset2")),
-    true = ?PF(Redis:set_is_member("myset", "s2")),
-    false = ?PF(Redis:set_is_member("myset2", "s2")),
-    [<<"s2">>] = ?PF(Redis:set_members("myset")),
-    true = Redis:set_rm("myset", "s2"),
-    true = ?PF(Redis:set_add("myset", "s1")),
-    <<"s1">> = ?PF(Redis:set_random_member("myset")),
+    0 = Redis:scard("k1"),
+    1 = Redis:sadd("k1", "e1"),
+    1 = Redis:scard("k1"),
 
-    catch ?PF(Redis:set_inter(["myset", "myset2"])),
-    catch ?PF(Redis:set_inter_store("myset11", ["myset", "myset2"])),
-    catch ?PF(Redis:set_union(["myset", "myset2"])),
-    catch ?PF(Redis:set_union_store("myset22", ["myset", "myset2"])),
-    catch ?PF(Redis:set_diff("myset", ["myset3", "myset2"])),
-    catch ?PF(Redis:set_diff_store("myset33", "myset", ["myset3", "myset2"])),
-    catch Redis:set_inter_store("myset", ["myset_not_exists"]),
-    (catch ?PF(Redis:set_move("myset", "myset2", "s2"))),
-    
+    <<"e1">> = Redis:spop("k1"),
+    1 = Redis:sadd("k1", ["e1"]),
+    true = Redis:sismember("k1", "e1"),
+    false = Redis:sismember("k1", "enotexist"),
+    <<"e1">> = Redis:spop("k1"),
+
+    [] = Redis:smembers("k1"),
+    2 = Redis:sadd("k1", ["e0", "e1"]),
+    0 = Redis:sadd("k1", ["e0", "e1"]),
+    0 = Redis:srem("k1", "enotexist"),
+    1 = Redis:srem("k1", ["e0"]),
+    [<<"e1">>] = Redis:smembers("k1"),
+    <<"e1">> = Redis:srandmember("k1"),
+
+    %% about diff
+    3 = Redis:sadd("k2", ["e0", "s0", "s1"]),
+    2 = Redis:sadd("k3", ["e0", "e1"]),
+    [<<"e1">>] = Redis:sdiff("k1", ["k2"]),
+    [] = Redis:sdiff("k1", ["k2", "k3"]),
+
+    1 = Redis:sdiffstore("d1", "k1", ["k2"]),
+
+    0 = Redis:sdiffstore("d1", "k1", ["k2", "k3"]),
+    false = Redis:exists("d1"),
+    Redis:flushdb(),
+
+    %% about inter
+    1 = Redis:sadd("k1", ["e1"]),
+    3 = Redis:sadd("k2", ["e0", "s0", "s1"]),
+    2 = Redis:sadd("k3", ["e0", "e1"]),
+
+    [<<"e0">>] = Redis:sinter(["k2", "k3"]),
+    [] = Redis:sinter(["k1", "k2"]),
+
+    1 = Redis:sinterstore("d1", ["k2", "k3"]),
+    0 = Redis:sinterstore("d1", ["k1", "k2"]),
+    Redis:flushdb(),
+
+    %% about union
+    1 = Redis:sadd("k1", ["e1"]),
+    2 = Redis:sadd("k3", ["e0", "e1"]),
+
+    [<<"e0">>, <<"e1">>] = Redis:sunion(["k1", "k3"]),
+
+    2 = Redis:sunionstore("d1", ["k1", "k3"]),
+    Redis:flushdb(),
+
     ok.
 
 test_zset(Config) ->
