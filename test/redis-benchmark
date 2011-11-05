@@ -35,7 +35,7 @@ main(Args) ->
     Config = parse_args(Args),
     %io:format("args is ~p~n config is ~p~n", [Args, Config]),
     crypto:start(),
-    code:add_path("../ebin"),
+    true = code:add_path(filename:join([root_dir(), "ebin"])),
     true = erlang:system_info(smp_support),
 
     Host = Config#config.host,
@@ -114,8 +114,8 @@ action_list() ->
      {fun(Redis, N) -> Redis:set("foo_rand000000000000", N) end, "SET"},
      {?F(Redis:get("foo_rand000000000000")), "GET"},
      {?F(Redis:incr("counter_rand000000000000")), "INCR"},
-     {?F(Redis:list_push_head("mylist", <<"bar">>)), "LPUSH"},
-     {?F(Redis:list_pop_head("mylist")), "LPOP"}
+     {?F(Redis:lpush("mylist", <<"bar">>)), "LPUSH"},
+     {?F(Redis:lpop("mylist")), "LPOP"}
     ].
 
 parse_args(Args) ->
@@ -135,3 +135,8 @@ parse_args([_ | T], Config) ->
     parse_args(T, Config);
 parse_args([], Config) ->
     Config.
+
+root_dir() ->
+    {ok, Cwd} = file:get_cwd(),
+    Path = escript:script_name(),
+    filename:dirname(filename:dirname(filename:join([Cwd, Path]))).
