@@ -40,6 +40,9 @@
 -define(N2S(N), integer_to_list(N)).
 -define(S2N(S), list_to_integer(S)).
 
+-define(F2S(N), float_to_list(N)).
+-define(S2F(S), list_to_float(S)).
+
 -define(IOLIST2B(IO), iolist_to_binary(IO)).
 
 %% the separtor

@@ -45,8 +45,7 @@ all() ->
         test_hash,
         test_list,
         test_set,
-        %test_zset,
-        %test_sort,
+        test_zset,
         %test_trans,
         %test_persistence,
         test_dummy
@@ -256,37 +255,128 @@ test_set(Config) ->
     2 = Redis:sunionstore("d1", ["k1", "k3"]),
     Redis:flushdb(),
 
+    %% about move
+    false = Redis:smove("k1", "k2", "e1"),
+    1 = Redis:sadd("k1", ["e1"]),
+    true = Redis:smove("k1", "k2", "e1"),
+    1 = Redis:scard("k2"),
+
+    Redis:flushdb(),
+
     ok.
 
 test_zset(Config) ->
     Redis = ?config(redis_client, Config),
 
-    true = ?PF(Redis:zset_add("myzset", "f1", 1)),
-    true = ?PF(Redis:zset_rm("myzset", "f1")),
-    2 = ?PF(Redis:zset_incr("myzset", "f1", 2)),
-    1 = ?PF(Redis:zset_incr("myzset", "f1", -1)),
-    % Reids 1.3.4
-    %0 = ?PF(Redis:zset_index("myzset", "f1")),
-    true = Redis:zset_add("myzset", "f2", 2),
-    true = Redis:zset_add("myzset", "f3", 3),
-    [<<"f1">>, <<"f2">>, <<"f3">>] = 
-        ?PF(Redis:zset_range_index("myzset", 0, -1, false)),
-    [<<"f2">>, <<"f3">>] = 
-        ?PF(Redis:zset_range_index("myzset", -2, -1, false)),
-    [{<<"f1">>, 1}, {<<"f2">>, 2}, {<<"f3">>, 3}] = 
-        ?PF(Redis:zset_range_index("myzset", 0, -1, true)),
-    ?PF(Redis:zset_range_index_reverse("myzset", 0, -1, true)),
-    [<<"f1">>, <<"f2">>, <<"f3">>] = 
-        ?PF(Redis:zset_range_score("myzset", 0, 100, false)),
-    [{<<"f1">>, 1}, {<<"f2">>, 2}, {<<"f3">>, 3}] =
-        ?PF(Redis:zset_range_score("myzset", 0, 100, true)),
-    [<<"f1">>] =
-        ?PF(Redis:zset_range_score("myzset", 0, 100, 0, 1, false)),
-    [{<<"f1">>, 1}] = 
-        ?PF(Redis:zset_range_score("myzset", 0, 100, 0, 1, true)),
-    1 = ?PF(Redis:zset_rm_by_score("myzset", 0, 1)),
-    2 = ?PF(Redis:zset_len("myzset")),
-    null = ?PF(Redis:zset_score("myzset", "f1")),
+    2 = Redis:zadd("k1", [{"v1", 1}, {"v2", 2}]),
+    2 = Redis:zcard("k1"),
+    1 = Redis:zadd("k1", [{"v3", 3.0}]),
+   
+    % zcount 
+    3 = Redis:zcount("k1", 1, 3),
+    3 = Redis:zcount("k1", '-inf', '+inf'),
+    2 = Redis:zcount("k1", 1.0, 2.0),
+
+    0 = Redis:zcount("k1", {open, 1}, {open, 1}),
+    0 = Redis:zcount("k1", {open, 1}, {open, 2}),
+    1 = Redis:zcount("k1", {closed, 1}, {open, 2}),
+    2 = Redis:zcount("k1", {closed, 1}, {closed, 2}),
+    3 = Redis:zcount("k1", {closed, 1}, {closed, 3.0}),
+
+    % zincrby
+    4 = Redis:zincrby("k1", 1.0, "v3"),
+    5.1 = Redis:zincrby("k1", 1.1, "v3"),
+
+    % zrange
+    [<<"v1">>, <<"v2">>, <<"v3">>] = Redis:zrange("k1", 0, -1),
+    [{<<"v1">>, 1}, 
+        {<<"v2">>, 2}, 
+        {<<"v3">>, 5.1}] = Redis:zrange("k1", 0, 2, true),
+
+    % zrangebyscore
+    [<<"v1">>, <<"v2">>] 
+        = Redis:zrangebyscore("k1", 1, 3),
+    [<<"v1">>, <<"v2">>, <<"v3">>] 
+        = Redis:zrangebyscore("k1", '-inf', '+inf'),
+    [<<"v1">>, <<"v2">>] 
+        = Redis:zrangebyscore("k1", 1.0, 2.0),
+
+    [] = Redis:zrangebyscore("k1", {open, 1}, {open, 1}),
+    [] = Redis:zrangebyscore("k1", {open, 1}, {open, 2}),
+    [{<<"v1">>, 1}] 
+        = Redis:zrangebyscore("k1", {closed, 1}, {open, 2}, true),
+    [<<"v1">>, <<"v2">>] 
+        = Redis:zrangebyscore("k1", {closed, 1}, {closed, 2}),
+    [<<"v1">>, <<"v2">>, <<"v3">>] 
+        = Redis:zrangebyscore("k1", {closed, 1}, {closed, 6.0}),
+
+    % zrank
+    null = Redis:zrank("k1", "vnotexist"),
+    0 = Redis:zrank("k1", "v1"),
+    1 = Redis:zrank("k1", "v2"),
+    2 = Redis:zrank("k1", "v3"),
+
+    % rev (score ordered from high to low)
+    [<<"v3">>, <<"v2">>] = Redis:zrevrange("k1", 0, 1),
+    [{<<"v3">>, 5.1}] = Redis:zrevrange("k1", 0, 0, true),
+    [<<"v2">>, <<"v1">>] 
+        = Redis:zrevrangebyscore("k1", 2, 1),
+    0 = Redis:zrevrank("k1", "v3"),
+    2 = Redis:zrevrank("k1", "v1"),
+
+    % zrem
+    0 = Redis:zrem("k1", "vnotexist"),
+    2 = Redis:zrem("k1", ["v1", "v2"]),
+    [<<"v3">>] = Redis:zrange("k1", 0, -1),
+    2 = Redis:zadd("k1", [{"v1", 1}, {"v2", 2}]),
+
+    1 = Redis:zremrangebyrank("k1", 0, 0),
+    2 = Redis:zremrangebyrank("k1", 0, -1),
+    0 = Redis:zcard("k1"),
+    2 = Redis:zadd("k1", [{"v1", 1}, {"v2", 2}]),
+
+    0 = Redis:zremrangebyscore("k1", 0, 0.9),
+    0 = Redis:zremrangebyscore("k1", 2.1, 2.9),
+    1 = Redis:zremrangebyscore("k1", 0, 1),
+    1 = Redis:zremrangebyscore("k1", 0, {closed, 2.0}),
+    0 = Redis:zcard("k1"),
+
+    % zscore
+    null = Redis:zscore("k1", "v1"),
+    2 = Redis:zadd("k1", [{"v1", 1}, {"v2", 2}]),
+    1 = Redis:zscore("k1", "v1"),
+    2 = Redis:zscore("k1", "v2"),
+
+    % zinter
+    Redis:flushdb(),
+    2 = Redis:zadd("k1", [{"v1", 1}, {"v2", 2}]),
+    2 = Redis:zadd("k2", [{"v1", 10}, {"v20", 20}]),
+    1 = Redis:zinterstore("d1", ["k1", "k2"]),
+    [<<"v1">>]  = Redis:zrange("d1", 0, -1),
+    1 = Redis:zinterstore("d1", ["k1", "k2"], [3, 4]),
+    [{<<"v1">>, 43}] = Redis:zrange("d1", 0, -1, true),
+    1 = Redis:zinterstore("d1", ["k1", "k2"], [3, 4], max),
+    [{<<"v1">>, 40}] = Redis:zrange("d1", 0, -1, true),
+
+    % zunion
+    Redis:flushdb(),
+    2 = Redis:zadd("k1", [{"v1", 1}, {"v2", 2}]),
+    2 = Redis:zadd("k2", [{"v1", 10}, {"v20", 20}]),
+    3 = Redis:zunionstore("d1", ["k1", "k2"]),
+    [{<<"v2">>,2}, {<<"v1">>, 11}, {<<"v20">>, 20}] 
+        = Redis:zrange("d1", 0, -1, true),
+
+    2 = Redis:zunionstore("d2", ["k1"]),
+    [<<"v1">>, <<"v2">>] = Redis:zrange("d2", 0, -1),
+    3 = Redis:zunionstore("d2", ["k1", "k2"], [2, 3]),
+    [{<<"v2">>, 4}, {<<"v1">>, 32}, {<<"v20">>, 60}] 
+        = Redis:zrange("d2", 0, -1, true),
+
+    3 = Redis:zunionstore("d2", ["k1", "k2"], [2, 3], min),
+    [{<<"v1">>, 2}, {<<"v2">>, 4}, {<<"v20">>, 60}] 
+        = Redis:zrange("d2", 0, -1, true),
+
+    Redis:flushdb(),
     ok.
 
 test_sort(Config) ->

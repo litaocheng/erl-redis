@@ -48,9 +48,11 @@
 %% sorted sets
 -export([zadd/2, zcard/1, zcount/3, zincrby/3, 
         zinterstore/2, zinterstore/3, zinterstore/4,
-        zrange/4, zrangebyscore/4, zrank/2, zrem/2,
-        zremrangebyrank/3, zremrangebyscore/3, zrevrange/4,
-        zrevrangebyscore/4, zrevrank/2, zscore/2, zunionstore/2, zunionstore/4]).
+        zrange/3, zrange/4, zrangebyscore/3, zrangebyscore/4, zrank/2, zrem/2,
+        zremrangebyrank/3, zremrangebyscore/3, 
+        zrevrange/3, zrevrange/4, zrevrangebyscore/3, zrevrangebyscore/4,
+        zrevrank/2, zscore/2, 
+        zunionstore/2, zunionstore/3, zunionstore/4]).
 
 %% pub/sub
 -export([psubscribe/3, subscribe/3, 
@@ -592,9 +594,9 @@ sunionstore(Dst, Keys) ->
 
 %% @doc Add one or more members to a sorted set, or 
 %% update its score if it already exists
--spec zadd(key(), [{score(), str()}]) -> uint().
+-spec zadd(key(), [{str(), score()}]) -> uint().
 zadd(Key, Mem) ->
-    L = [[?N2S(Score), Val] || {Score, Val} <- Mem],
+    L = lists:append([[score_to_str(Score), Val] || {Val, Score} <- Mem]),
     call(mbulk_list([<<"ZADD">>, Key | L])).
 
 %% @doc return the number of elements in sorted set
@@ -613,7 +615,7 @@ zcount(Key, Min, Max) ->
 %% @doc Increment the score of a member in a sorted set
 -spec zincrby(key(), int(), key()) -> score().
 zincrby(Key, N, Mem) ->
-    call(mbulk(<<"ZINCRBY">>, Key, ?N2S(N), Mem), fun str_to_score/1).
+    call(mbulk(<<"ZINCRBY">>, Key, score_to_str(N), Mem), fun str_to_score/1).
 
 %% @doc Intersect multiple sorted sets and store 
 %% the resulting sorted set in a new key
@@ -627,13 +629,17 @@ zinterstore(Dst, Keys, Weights, Aggregate) ->
 
 %% @doc Return a range of members in a sorted set, by index
 -spec zrange(key(), int(), int(), boolean()) -> 
-    [val()] | [{key(), val()}].
+    [val()] | [{str(), score()}].
+zrange(Key, Start, End) ->
+    zrange(Key, Start, End, false).
 zrange(Key, Start, End, WithScore) ->
     do_zrange(<<"ZRANGE">>, Key, Start, End, WithScore).
 
 %% @doc Return a range of members in a sorted set, by score
 -spec zrangebyscore(key(), score(), score(), boolean()) -> 
-    [val()] | [{key(), val()}].
+    [val()] | [{str(), score()}].
+zrangebyscore(Key, Min, Max) ->
+    zrangebyscore(Key, Min, Max, false).
 zrangebyscore(Key, Min, Max, WithScore) ->
     do_zrange_by_score(<<"ZRANGEBYSCORE">>, Key, Min, Max, WithScore).
 
@@ -663,16 +669,20 @@ zremrangebyscore(Key, Min, Max) ->
 %% @doc Return a range of members in a sorted set, by index,
 %% with scores ordered from high to low
 -spec zrevrange(key(), int(), int(), boolean()) -> 
-    [value()] | [{key(), value()}].
+    [value()] | [{key(), score()}].
+zrevrange(Key, Start, End) ->
+    zrevrange(Key, Start, End, false).
 zrevrange(Key, Start, End, WithScore) ->
     do_zrange(<<"ZREVRANGE">>, Key, Start, End, WithScore).
 
 %% @doc Return a range of members in a sorted set, by score,
 %% with scores ordered from high to low
 -spec zrevrangebyscore(key(), score(), score(), boolean()) -> 
-    [val()] | [{key(), val()}].
-zrevrangebyscore(Key, Min, Max, WithScore) ->
-    do_zrange_by_score(<<"ZREVRANGEBYSCORE">>, Key, Min, Max, WithScore).
+    [val()] | [{key(), score()}].
+zrevrangebyscore(Key, Max, Min) ->
+    zrevrangebyscore(Key, Max, Min, false).
+zrevrangebyscore(Key, Max, Min, WithScore) ->
+    do_zrange_by_score(<<"ZREVRANGEBYSCORE">>, Key, Max, Min, WithScore).
 
 %% @doc Determine the index of a member in a sorted set, 
 %% with scores ordered from high to low
@@ -684,14 +694,16 @@ zrevrank(Key, Mem) ->
 %% in a sorted set
 -spec zscore(key(), key()) -> score() | null().
 zscore(Key, Mem) ->
-    call(mbulk(<<"ZSCORE">>, Key, Mem)).
+    call(mbulk(<<"ZSCORE">>, Key, Mem), fun str_to_score/1).
 
 %% @doc Add multiple sorted sets and store 
 %% the resulting sorted set in a new key
--spec zunionstore(key(), [key()]) ->
-    integer().
+-spec zunionstore(key(), [key()]) -> uint().
 zunionstore(Dst, Keys) ->
     zunionstore(Dst, Keys, [], sum).
+zunionstore(Dst, Keys, Weights) ->
+    ?ASSERT(length(Keys) =:= length(Weights)),
+    zunionstore(Dst, Keys, Weights, sum).
 zunionstore(Dst, Keys, Weights, Aggregate) ->
     do_zset_store(<<"ZUNIONSTORE">>, Dst, Keys, Weights, Aggregate).
 
@@ -969,7 +981,8 @@ do_zrange(Cmd, Key, Start, End, true) ->
 
 %% get sorted set in range, by score
 do_zrange_by_score(Cmd, Key, Min, Max, false) ->
-    call(mbulk(Cmd, Key, score_to_str(Min), score_to_str(Max)));
+    call(mbulk(Cmd, Key, score_to_str(Min), score_to_str(Max)),
+        fun may_null_to_list/1);
 do_zrange_by_score(Cmd, Key, Min, Max, true) ->
     call(mbulk_list([Cmd, Key, 
         score_to_str(Min), score_to_str(Max), <<"WITHSCORES">>]),
@@ -1092,20 +1105,6 @@ is_empty_str("") -> true;
 is_empty_str(<<>>) -> true;
 is_empty_str(_) -> false.
 
-%% score convert string for zset
-score_to_str('-inf') ->
-    <<"-inf">>;
-score_to_str('+inf') ->
-    <<"+inf">>;
-score_to_str({open, S}) ->
-    ?N2S(S); 
-score_to_str({closed, S}) ->
-    [$( | ?N2S(S)];
-score_to_str(S) when is_integer(S) ->
-    ?N2S(S);
-score_to_str(S) when is_float(S) ->
-    erlang:float_to_list(S).
-
 %% convert to list
 may_single_to_list([H|_] = V) when is_list(H); is_binary(H) -> V;
 may_single_to_list(V) -> [V].
@@ -1146,7 +1145,23 @@ do_fun(Fun, E) ->
 may_null_to_list(null) -> [];
 may_null_to_list(L) when is_list(L) -> L.
 
+%% score convert string for zset
+score_to_str('-inf') ->
+    <<"-inf">>;
+score_to_str('+inf') ->
+    <<"+inf">>;
+score_to_str({open, S}) ->
+    [$( | score_to_str(S)];
+score_to_str({closed, S}) ->
+    score_to_str(S);
+score_to_str(S) when is_integer(S) ->
+    ?N2S(S);
+score_to_str(S) when is_float(S) ->
+    ?F2S(S).
+
 %% string => score
+str_to_score(null) ->
+    null;
 str_to_score(B) when is_binary(B) ->
     str_to_score(binary_to_list(B));
 str_to_score(S) when is_list(S) ->
