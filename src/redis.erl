@@ -1106,6 +1106,7 @@ is_empty_str(<<>>) -> true;
 is_empty_str(_) -> false.
 
 %% convert to list
+may_single_to_list([]) -> [];
 may_single_to_list([H|_] = V) when is_list(H); is_binary(H) -> V;
 may_single_to_list(V) -> [V].
 

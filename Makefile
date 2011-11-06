@@ -8,15 +8,21 @@ ERL_LIB := $(shell erl -noshell -eval 'io:format("~s",[code:lib_dir()]),erlang:h
 		2> /dev/null)
 APP_FULLNAME := $(APP_NAME)-$(APP_VSN)
 
+ifdef LOG
+	MAKE_ARGS =
+else
+	MAKE_ARGS ='NOLOG=true'
+endif
+
 all: compile
 
 compile:
 	(mkdir -p ./ebin)
-	(cd src;$(MAKE) NOLOG=true)
+	(cd src;$(MAKE) $(MAKE_ARGS))
 
 test_compile: 
 	(mkdir -p ./ebin)
-	(cd src;$(MAKE) TEST=true NOLOG=true)
+	(cd src;$(MAKE) TEST=true $(MAKE_ARGS))
 
 test: clean unit_test comm_test 
 	@#(make clean)

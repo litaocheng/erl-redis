@@ -145,11 +145,11 @@ punsubscribe(Client, Patterns, Callback) ->
 %% it will return 'ok' immediately. you must do the working in 
 %% callback functions
 subscribe(Client, Channels, CbSub, CbMsg) ->
-    %?DEBUG2("subscribe to channels:~p", [Channels]),
+    ?DEBUG2("subscribe to channels:~p", [Channels]),
     call(Client, {subscribe, ?PUBSUB_CHANNEL, Channels, CbSub, CbMsg}).
 
 unsubscribe(Client, Channels, Callback) ->
-    %?DEBUG2("subscribe to channels:~p", [Channels]),
+    ?DEBUG2("unsubscribe to channels:~p", [Channels]),
     call(Client, {unsubscribe, ?PUBSUB_CHANNEL, Channels, Callback}).
 
 -spec quit(client()) ->
@@ -214,12 +214,12 @@ init({Server = {Host, Port}, Passwd}) ->
 
 handle_call({command, {Data, Timeout}}, _From, 
         State = #state{sock = Sock, server = _Server, ctx = normal}) ->
-    ?DEBUG2("redis client command:~n~p~n\t=> ~p", [Data, _Server]),
+    ?DEBUG2("command:~n~p~n\t=> ~p", [Data, _Server]),
     Reply = do_send_recv(Data, Sock, Timeout),
     {reply, Reply, State};
 handle_call({command, {Data, Len, Timeout}}, _From, 
         State = #state{sock = Sock, server = _Server, ctx = normal}) ->
-    ?DEBUG2("redis client multi_command(~p):~p=> ~p", [Len, Data, _Server]),
+    ?DEBUG2("multi_command(~p):~p=> ~p", [Len, Data, _Server]),
     Reply = do_send_multi_recv(Data, Len, Sock, Timeout),
     {reply, Reply, State};
 handle_call({command, _}, _From, State) ->
@@ -230,8 +230,8 @@ handle_call({subscribe, Type, L, CbSub, CbMsg}, _From,
         State = #state{sock = Sock, pubsub_tid = Tid}) ->
     Cmd = 
     case Type of
-        ?PUBSUB_CHANNEL -> <<"subscribe">>;
-        ?PUBSUB_PATTERN -> <<"psubscribe">>
+        ?PUBSUB_CHANNEL -> <<"SUBSCRIBE">>;
+        ?PUBSUB_PATTERN -> <<"PSUBSCRIBE">>
     end,
     Data = redis_proto:mbulk_list([Cmd | L]),
     do_send(Sock, Data),
@@ -243,8 +243,8 @@ handle_call({unsubscribe, Type, L, Callback}, _From,
         State = #state{sock = Sock, pubsub_tid = Tid}) ->
     Cmd = 
     case Type of
-        ?PUBSUB_CHANNEL -> <<"unsubscribe">>;
-        ?PUBSUB_PATTERN -> <<"punsubscribe">>
+        ?PUBSUB_CHANNEL -> <<"UNSUBSCRIBE">>;
+        ?PUBSUB_PATTERN -> <<"PUNSUBSCRIBE">>
     end,
     Data = redis_proto:mbulk_list([Cmd | L]),
     do_send(Sock, Data),
@@ -304,7 +304,7 @@ call(Client, Req) ->
 
 %% create pubsub table
 do_create_table() ->
-    ets:new(dummy, [set, private, {keypos, 1},
+    ets:new(dummy, [set, private, {keypos, #pubsub.id},
             {read_concurrency, true}]).
 
 to_name(Host, Port, First) ->
@@ -427,8 +427,9 @@ do_auth(Sock, Passwd) ->
 do_add_pubsub(Type, L, CbSub, CbMsg, Table) ->
     lists:foreach(
     fun(E) ->
+        B = ?IF(is_binary(E), E, ?S2B(E)),
         PubSub = #pubsub{
-            id = {Type, E},
+            id = {Type, B},
             cb_sub = CbSub, 
             cb_msg = CbMsg
         },
@@ -468,7 +469,9 @@ do_get_pubsub(Type, Data, Table) ->
 
 %% handle the pubsub tcp data
 do_handle_pubsub(Sock, Packet, State = #state{pubsub_tid = Table}) ->
-    case do_handle_packet(Sock, Packet, null, ?COMMAND_TIMEOUT) of
+    List = do_handle_packet(Sock, Packet, null, ?COMMAND_TIMEOUT),
+    ?DEBUG2("***:~p", [List]),
+    case List of
         [<<"subscribe">>, Channel, N] ->
             do_handle_subscribe(?PUBSUB_CHANNEL, Channel, N, Table),
             State;
@@ -481,26 +484,46 @@ do_handle_pubsub(Sock, Packet, State = #state{pubsub_tid = Table}) ->
             do_handle_unsubscribe(?PUBSUB_PATTERN, Channel, N, State);
         [<<"message">>, Channel, Msg] ->
             #pubsub{cb_unsub = Fun} = do_get_pubsub(?PUBSUB_CHANNEL, Channel, Table),
-            catch Fun(Channel, Msg),
+            try
+                Fun(Channel, Msg)
+            catch
+                _T:_R ->
+                    ?ERROR2("message callback ~p:~p", [_T, _R])
+            end,
             State;
         [<<"pmessage">>, Pattern, Channel, Msg] ->
             #pubsub{cb_unsub = Fun} = do_get_pubsub(?PUBSUB_PATTERN, Pattern, Table),
-            catch Fun(Pattern, Channel, Msg),
+            try
+                Fun(Pattern, Channel, Msg)
+            catch
+                _T:_R ->
+                    ?ERROR2("pmessage callback ~p:~p", [_T, _R])
+            end,
             State
     end.
 
 %% handle the subscribe 
 do_handle_subscribe(Type, Data, N, Table) ->
     #pubsub{cb_sub = Fun} = do_get_pubsub(Type, Data, Table),
-    catch Fun(Data, N).
+    try
+        Fun(Data, N)
+    catch
+        _T:_R ->
+            ?ERROR2("subscribe callback ~p:~p", [_T, _R])
+    end.
 
 %% handle the unsubscribe
 do_handle_unsubscribe(_Type, _Data, 0, #state{pubsub_tid = Table} = State) ->
-    ets:delete(Table),
+    ets:delete_all_objects(Table),
     State#state{ctx = normal};
 do_handle_unsubscribe(Type, Data, N, #state{pubsub_tid = Table} = State) ->
     #pubsub{cb_unsub = Fun} = do_del_pubsub(Type, Data, Table),
-    catch Fun(Data, N),
+    try
+        Fun(Data, N)
+    catch
+        _T:_R ->
+            ?ERROR2("unsubscribe callback ~p:~p", [_T, _R])
+    end,
     State.
 
 %%---------------
