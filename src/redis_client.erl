@@ -445,10 +445,23 @@ do_del_pubsub(Type, Data, Table) ->
     PubSub.
 
 %% update the cb_unsub callback in pubsub
+do_update_pubsub_unsub(Type, [], Cb, Table) ->
+    % update all the elements which #pubsub.cb_unsub is undefined
+    ets:foldl(
+    fun
+        (#pubsub{id = {T, _}, cb_unsub = undefined} = PubSub, Acc) when Type =:= T ->
+            PubSub2 = PubSub#pubsub{cb_unsub = Cb},
+            true = ets:insert(Table, PubSub2),
+            Acc;
+        (#pubsub{}, Acc) ->
+            Acc
+    end, ?NONE, Table),
+    ok;
 do_update_pubsub_unsub(Type, L, Cb, Table) ->
     lists:foreach(
     fun(E) ->
-        Id = {Type, E},
+        B = ?IF(is_binary(E), E, ?S2B(E)),
+        Id = {Type, B},
         PubSub =
         case ets:lookup(Table, Id) of
             [] ->
@@ -480,10 +493,10 @@ do_handle_pubsub(Sock, Packet, State = #state{pubsub_tid = Table}) ->
             State;
         [<<"unsubscribe">>, Channel, N] ->
             do_handle_unsubscribe(?PUBSUB_CHANNEL, Channel, N, State);
-        [<<"punsubscribe">>, Channel, N] ->
-            do_handle_unsubscribe(?PUBSUB_PATTERN, Channel, N, State);
+        [<<"punsubscribe">>, Pattern, N] ->
+            do_handle_unsubscribe(?PUBSUB_PATTERN, Pattern, N, State);
         [<<"message">>, Channel, Msg] ->
-            #pubsub{cb_unsub = Fun} = do_get_pubsub(?PUBSUB_CHANNEL, Channel, Table),
+            #pubsub{cb_msg = Fun} = do_get_pubsub(?PUBSUB_CHANNEL, Channel, Table),
             try
                 Fun(Channel, Msg)
             catch
@@ -492,8 +505,10 @@ do_handle_pubsub(Sock, Packet, State = #state{pubsub_tid = Table}) ->
             end,
             State;
         [<<"pmessage">>, Pattern, Channel, Msg] ->
-            #pubsub{cb_unsub = Fun} = do_get_pubsub(?PUBSUB_PATTERN, Pattern, Table),
+            #pubsub{cb_msg= Fun} = do_get_pubsub(?PUBSUB_PATTERN, Pattern, Table),
             try
+                ?DEBUG2("call pmessage pattern:~p channel:~p msg:~p",
+                    [Pattern, Channel, Msg]),
                 Fun(Pattern, Channel, Msg)
             catch
                 _T:_R ->
@@ -506,6 +521,8 @@ do_handle_pubsub(Sock, Packet, State = #state{pubsub_tid = Table}) ->
 do_handle_subscribe(Type, Data, N, Table) ->
     #pubsub{cb_sub = Fun} = do_get_pubsub(Type, Data, Table),
     try
+        ?DEBUG2("call subscribe Type:~p data:~p n:~p",
+            [Type, Data, N]),
         Fun(Data, N)
     catch
         _T:_R ->
