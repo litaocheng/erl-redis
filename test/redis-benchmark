@@ -52,20 +52,24 @@ main(Args) ->
         rand_redis(Host, Port, Config#config.pool)
     end,
 
-    [do_bench(F, Requests, Clients, FRedis, Title) ||
-        {F, Title} <- action_list()].
+    [begin
+        do_bench(F, "normal::" ++ Title, Requests, Clients, FRedis, fun start_client_normal/4),
+        do_bench(F, "pipeline::" ++ Title, Requests, Clients, FRedis, fun start_client_pipeline/4),
+        io:format("\n")
+    end ||  {F, Title} <- action_list()].
+       
 
 rand_redis(Host, Port, N) ->
     Selected = redis_client:existing_name(Host, Port, random:uniform(N)),
     %io:format("selected redis is ~p~n", [Selected]),
     redis_client:handler(Selected).
 
-do_bench(F, N, Conc, FRedis, Title) ->
+do_bench(F, Title, N, Conc, FRedis, ClientFun) ->
     NP = N div Conc,
     Parent = self(),
 
     % spawn the clients
-    Pids = [start_client(FRedis(), Parent, F, NP) || _ <- lists:duplicate(Conc, 0)],
+    Pids = [ClientFun(FRedis(), Parent, F, NP) || _ <- lists:duplicate(Conc, 0)],
     T1 = now(),
     % start the clients
     [Pid ! {Parent, start} || Pid <- Pids],
@@ -84,7 +88,11 @@ do_bench(F, N, Conc, FRedis, Title) ->
     io:format("~p requests per second\n", [round(N2/Second)]),
     ok.
 
-start_client(Redis, Parent, F, NP) ->
+%%-----------
+%% clients
+%%-----------
+
+start_client_normal(Redis, Parent, F, NP) ->
     spawn(
     fun() ->
         receive 
@@ -105,6 +113,30 @@ do_times(Redis, F, N) ->
             F(Redis, integer_to_list(N))
     end,
     do_times(Redis, F, N-1).
+
+start_client_pipeline(Redis, Parent, F, NP) ->
+    spawn(
+    fun() ->
+        receive 
+            {Parent, start} ->
+                ok
+        end,
+        FunPipeline = 
+        fun() ->
+            [begin
+                case is_function(F, 1) of
+                    true ->
+                        F(Redis);
+                    false ->
+                        F(Redis, integer_to_list(N))
+                end
+            end || N <- lists:seq(1, NP)]
+        end,
+        Pipeline = redis_client:pipeline(Redis),
+        Pipeline:pipeline(FunPipeline),
+        Parent ! {ack, self(), NP}
+    end).
+
 
 -define(F(Expr),
     (fun(Redis) -> Expr end)).

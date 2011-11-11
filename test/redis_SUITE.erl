@@ -46,6 +46,7 @@ all() ->
         test_list,
         test_set,
         test_zset,
+        test_pipeline,
         %test_trans,
         %test_persistence,
         test_dummy
@@ -377,6 +378,21 @@ test_zset(Config) ->
         = Redis:zrange("d2", 0, -1, true),
 
     Redis:flushdb(),
+    ok.
+
+test_pipeline(Config) ->
+    Redis = ?config(redis_client, Config),
+    Pipeline = redis_client:pipeline(Redis),
+    N = 10000,
+    L = lists:seq(1, N),
+    Fun = 
+    fun() ->
+        [Pipeline:set(K, K*2) || K <- L],
+        [Pipeline:get(K) || K <- L]
+    end,
+    R = Pipeline:pipeline(Fun),
+    RExpect = lists:duplicate(N, ok) ++ [K * 2 || K <- L],
+    R = RExpect,
     ok.
 
 test_sort(Config) ->

@@ -130,7 +130,7 @@ command(Client, Data) ->
 %% @doc send multiple commands to redis server
 -spec multi_command(client(), [iolist()]) -> any().
 multi_command(Client, List) ->
-    Len = lists:len(List),
+    Len = length(List),
     call(Client, {command, {List, Len, ?COMMAND_TIMEOUT}}).
 
 %% @doc subscribe the the patterns, called by redis:psubscribe

@@ -812,7 +812,7 @@ pipeline(Fun) when is_function(Fun, 0) ->
             Fun(),
             Cmds = get_pipeline_cmd(),
             FunList = get_pipeline_fun(),
-            ResultList = redis_client:commands(Cmds),
+            ResultList = redis_client:multi_command(Client, Cmds),
             clear_pipeline_ctx(),
             lists:mapfoldl(
             fun(R, [F|T]) ->
