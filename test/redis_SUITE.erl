@@ -11,6 +11,7 @@
         ct:log(default, "~n~80..-s\ncall\t:\t~s~nresult\t:\t~p~n~80..=s~n~n", ["-", ??F, V, "="]),
         V
     end()).
+-define(N2B(N), list_to_binary(integer_to_list(N))).
 
 suite() -> [
     {timetrap,{minutes,2}}
@@ -42,11 +43,13 @@ end_per_testcase(Name, Config) ->
 all() -> 
     [
         test_string,
+        test_key,
         test_hash,
         test_list,
         test_set,
         test_zset,
         test_pipeline,
+        test_sort,
         %test_trans,
         %test_persistence,
         test_dummy
@@ -96,6 +99,41 @@ test_string(Config) ->
 
     ok = ?PF(Redis:flushdb()),
     ok.
+
+%% test keys 
+test_key(Config) ->
+    Redis = ?config(redis_client, Config),
+    0 = Redis:del("key_not_exist"),
+    ok = Redis:set("k1", "v1"), 
+    1 = Redis:del("k1"),
+    ok = Redis:set("k1", "v1"), 
+    1 = Redis:del(["k1", "key_not_exist"]),
+
+    false = Redis:exists("k1"),
+    ok = Redis:set("k1", "v1"), 
+    true = Redis:exists("k1"),
+
+    true = Redis:expire("k1", 5),
+    true = Redis:expireat("k1", 132341234),
+    false = Redis:persist("k1"),
+
+    ok = Redis:set("k1", "v1"), 
+    [] = Redis:keys("k1_not_exist_*"),
+    [<<"k1">>] = Redis:keys("*"),
+    [<<"k1">>] = Redis:keys("k*"),
+
+    <<"k1">> = Redis:randomkey(),
+    ok = Redis:rename("k1", "k2"),
+    true = Redis:renamenx("k2", "k3"),
+    ok = Redis:set("k4", "v4"),
+    false = Redis:renamenx("k3", "k4"),
+
+    string = Redis:type("k3"),
+    Redis:ttl("k3"),
+
+    ok = ?PF(Redis:flushdb()),
+    ok.
+
 
 test_hash(Config) -> 
     Redis = ?config(redis_client, Config),
@@ -383,7 +421,7 @@ test_zset(Config) ->
 test_pipeline(Config) ->
     Redis = ?config(redis_client, Config),
     Pipeline = redis_client:pipeline(Redis),
-    N = 10000,
+    N = 5,
     L = lists:seq(1, N),
     Fun = 
     fun() ->
@@ -391,7 +429,7 @@ test_pipeline(Config) ->
         [Pipeline:get(K) || K <- L]
     end,
     R = Pipeline:pipeline(Fun),
-    RExpect = lists:duplicate(N, ok) ++ [K * 2 || K <- L],
+    RExpect = lists:duplicate(N, ok) ++ [?N2B(K * 2) || K <- L],
     R = RExpect,
     ok.
 
@@ -400,11 +438,11 @@ test_sort(Config) ->
     SortOpt = #redis_sort{},
     ?PF(Redis:sort("mylist", SortOpt)),
 
-    Redis:list_trim("top_uid", 0, -1),
-    Redis:list_push_tail("top_uid", "2"),
-    Redis:list_push_tail("top_uid", "5"),
-    Redis:list_push_head("top_uid", "8"),
-    Redis:list_push_tail("top_uid", "10"),
+    Redis:ltrim("top_uid", 0, -1),
+    Redis:lpush("top_uid", "2"),
+    Redis:rpush("top_uid", "5"),
+    Redis:lpush("top_uid", "8"),
+    Redis:rpush("top_uid", "10"),
 
     Redis:set("age_2", "20"),
     Redis:set("age_5", "50"),

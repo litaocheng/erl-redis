@@ -122,7 +122,7 @@ db() ->
 -spec del(Keys :: [key()] | key()) -> integer().
 del([H|_] = Key) when is_list(H); is_binary(H) ->
     call(mbulk_list([<<"DEL">> | Key]));
-del(Key) when is_binary(Key) ->
+del(Key) ->
     call(mbulk(<<"DEL">>, Key)).
 
 %% @doc test if the key exists
@@ -814,6 +814,7 @@ pipeline(Fun) when is_function(Fun, 0) ->
             FunList = get_pipeline_fun(),
             ResultList = redis_client:multi_command(Client, Cmds),
             clear_pipeline_ctx(),
+            {Result, _} =
             lists:mapfoldl(
             fun(R, [F|T]) ->
                 case F of
@@ -822,7 +823,8 @@ pipeline(Fun) when is_function(Fun, 0) ->
                     _ ->
                         {F(R), T}
                 end
-            end, FunList, ResultList);
+            end, FunList, ResultList),
+            Result;
         false ->
             throw(badmodel)
     end.
